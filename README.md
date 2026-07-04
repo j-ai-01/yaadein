@@ -125,6 +125,12 @@ expected memories and measure.
   human-in-the-loop for confirmed conflicts), promote/decay from usage.
 - **Inspector CLI:** `yaad list | show | confirm | conflicts`.
 - **Transcript watcher:** polling fallback for harnesses without hooks.
+- **Full BM25 in recall** — deliberately deferred (YAGNI): today's recall is
+  semantic search + a keyword bonus, which is plenty at one-sentence-fact
+  scale. Upgrade trigger: exact-keyword memories ranking below fuzzy matches,
+  or the store passing ~1,000 memories. One-function change
+  (`recall` in `yaadein/service.py`); Recall's hybrid retriever is the
+  reference implementation.
 
 Design history lives in [docs/specs](docs/specs) and [docs/plans](docs/plans).
 Yaadein began life inside [Recall](https://github.com/j-ai-01/rag-pipeline),
