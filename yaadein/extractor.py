@@ -110,13 +110,23 @@ class Extractor:
 
         transcript_hash = file_hash(transcript_path)
         processed = load_ingested(self._extract_log)
-        if processed.get(str(transcript_path)) == transcript_hash:
+        record = processed.get(str(transcript_path))
+        if isinstance(record, str):  # legacy format: bare hash, no bookmark
+            record = {"hash": record, "turns": 0}
+        if record and record.get("hash") == transcript_hash:
             return ExtractionResult(already_processed=True)
 
         turns = parser(transcript_path)
-        text = transcript_text(turns, MEMORY_TRANSCRIPT_MAX_CHARS)
+        # The bookmark: only distill turns added since the last successful
+        # pass, so re-mining a growing transcript can never re-derive (and
+        # re-word) facts from text it has already seen.
+        bookmark = record.get("turns", 0) if record else 0
+        if bookmark > len(turns):  # transcript rewritten/truncated
+            bookmark = 0
+        new_turns = turns[bookmark:]
+        text = transcript_text(new_turns, MEMORY_TRANSCRIPT_MAX_CHARS)
         if not text.strip():
-            self._mark_processed(processed, transcript_path, transcript_hash)
+            self._mark_processed(processed, transcript_path, transcript_hash, len(turns))
             return ExtractionResult()
 
         clean = redact(text)
@@ -163,11 +173,13 @@ class Extractor:
             result.error = str(e)
             return result
 
-        self._mark_processed(processed, transcript_path, transcript_hash)
+        self._mark_processed(processed, transcript_path, transcript_hash, len(turns))
         return result
 
-    def _mark_processed(self, processed: dict, path: Path, transcript_hash: str) -> None:
-        processed[str(path)] = transcript_hash
+    def _mark_processed(
+        self, processed: dict, path: Path, transcript_hash: str, turns_seen: int
+    ) -> None:
+        processed[str(path)] = {"hash": transcript_hash, "turns": turns_seen}
         self._extract_log.parent.mkdir(parents=True, exist_ok=True)
         save_ingested(processed, self._extract_log)
 

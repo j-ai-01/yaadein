@@ -38,7 +38,7 @@ MEMORY_BRIEFING_LIMITS = {"facts": 10, "decisions": 5, "gotchas": 5}
 # ── Extraction pipeline ───────────────────────────────────
 MEMORY_MAX_PER_SESSION = _env_int("MAX_PER_SESSION", 5)
 MEMORY_CONFIDENCE_FLOOR = _env_float("CONFIDENCE_FLOOR", 0.6)
-MEMORY_REINFORCE_THRESHOLD = _env_float("REINFORCE_THRESHOLD", 0.9)
+MEMORY_REINFORCE_THRESHOLD = _env_float("REINFORCE_THRESHOLD", 0.85)
 # fits gemma4's 8192-token window with room for the prompt
 # (code-heavy text runs ~3 chars/token)
 MEMORY_TRANSCRIPT_MAX_CHARS = _env_int("TRANSCRIPT_MAX_CHARS", 16000)

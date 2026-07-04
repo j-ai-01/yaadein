@@ -216,3 +216,53 @@ def test_extract_survives_cross_thread_service_use(tmp_path):
     result = results[0]
     assert result.error is None
     assert result.written or result.reinforced
+
+
+def test_bookmark_second_pass_mines_only_new_turns(tmp_path):
+    """The bookmark: a grown transcript re-mines ONLY the added turns."""
+    transcript = tmp_path / "session.jsonl"
+    turn_a = json.dumps({"type": "user", "message": {"role": "user", "content": "I prefer pytest over unittest, always."}})
+    turn_b = json.dumps({"type": "user", "message": {"role": "user", "content": "Also we deploy with the blue pipeline."}})
+    transcript.write_text(turn_a)
+
+    gen = CannedGenerator(canned_json("I prefer pytest over unittest"))
+    extractor, store, _ = make_extractor(tmp_path, gen)
+    extractor.extract(transcript)
+    assert "pytest over unittest" in gen.prompts[0]
+
+    transcript.write_text(turn_a + "\n" + turn_b)  # transcript grows
+
+    class AssertingGenerator:
+        def __init__(self):
+            self.prompts = []
+
+        def generate(self, prompt):
+            self.prompts.append(prompt)
+            assert "blue pipeline" in prompt, "new turn must be visible"
+            assert "pytest over unittest" not in prompt, "old turn must NOT be re-read"
+            return "[]"
+
+    extractor._generator = AssertingGenerator()
+    result = extractor.extract(transcript)
+    assert result.error is None
+    assert len(store.list()) == 1  # nothing duplicated
+
+
+def test_bookmark_unchanged_transcript_still_skips(tmp_path):
+    transcript = write_transcript(tmp_path, "I prefer pytest over unittest, always.")
+    gen = CannedGenerator(canned_json("I prefer pytest over unittest"))
+    extractor, _, _ = make_extractor(tmp_path, gen)
+    extractor.extract(transcript)
+    assert extractor.extract(transcript).already_processed is True
+
+
+def test_bookmark_tolerates_legacy_bare_hash_log(tmp_path):
+    from utils.file_hash import file_hash
+    from utils.ingest_tracker import save_ingested
+
+    transcript = write_transcript(tmp_path, "I prefer pytest over unittest, always.")
+    log = tmp_path / ".extracted.json"
+    save_ingested({str(transcript): file_hash(transcript)}, log)  # legacy format
+    gen = CannedGenerator(canned_json("I prefer pytest over unittest"))
+    extractor, _, _ = make_extractor(tmp_path, gen)
+    assert extractor.extract(transcript).already_processed is True
