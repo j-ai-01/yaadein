@@ -179,10 +179,10 @@ high-entropy strings) *before* the LLM ever sees the text.
 
 ### Near-real-time extraction (the watcher)
 
-You don't have to wait for a session to end. Every 5 minutes
-(`MEMORY_WATCH_INTERVAL_SECONDS` in config.py; 0 disables) the daemon sweeps
-`~/.claude/projects/` for transcripts modified in the last 10 minutes and
-re-mines them. This is safe by construction: unchanged transcripts are
+You don't have to wait for a session to end. Every 30 seconds
+(`MEMORY_WATCH_INTERVAL_SECONDS` in config.py; 0 disables, raise it to
+lighten the load on your machine) the daemon sweeps `~/.claude/projects/`
+for transcripts modified within the last minute and re-mines them. This is safe by construction: unchanged transcripts are
 skipped by content hash, and facts the LLM re-derives *reinforce* the
 existing memory instead of duplicating it. So during a long working session
 your memories stay at most ~5 minutes behind the conversation — and the

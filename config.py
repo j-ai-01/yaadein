@@ -30,4 +30,4 @@ MEMORY_EXTRACT_LOG = MEMORY_DIR / ".extracted.json"
 # Safe to re-run: unchanged files are hash-skipped, known facts reinforce.
 # Set interval to 0 to disable the watcher entirely.
 MEMORY_WATCH_ROOT = Path.home() / ".claude" / "projects"
-MEMORY_WATCH_INTERVAL_SECONDS = 300
+MEMORY_WATCH_INTERVAL_SECONDS = 30
