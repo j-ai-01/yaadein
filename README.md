@@ -99,6 +99,26 @@ claude mcp list      # → yaadein: ... ✓ Connected
 **Cursor / other MCP clients:** add an SSE MCP server with URL
 `http://127.0.0.1:8899/sse` in their MCP settings.
 
+**Kiro:** add to `~/.kiro/settings/mcp.json` (the `mcp-remote` bridge covers
+Kiro builds that only speak stdio servers; needs node/npx):
+
+```json
+{
+  "mcpServers": {
+    "yaadein": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "http://127.0.0.1:8899/sse"],
+      "disabled": false,
+      "autoApprove": ["recall_memory", "memory_briefing"]
+    }
+  }
+}
+```
+
+Kiro then shares the same brain (all four tools). Auto-*mining* of Kiro
+sessions additionally needs a `kiro-sessions` transcript parser — see
+[Configuration](#configuration).
+
 > ⚠️ **Tools load at session start.** A session that was already open when
 > you registered the server will NOT have the memory tools — open a new one.
 
@@ -252,6 +272,35 @@ SQLite is the source of truth and Chroma is a derived index, so deleting
 only `memory_store/chroma_db/` loses nothing but the search index.
 
 ---
+
+## Configuration
+
+Everything tunable lives in [config.py](config.py), and every knob can be
+overridden per-run with a `YAADEIN_*` environment variable — no file edits:
+
+| Env var | Default | What it controls |
+|---|---|---|
+| `YAADEIN_HOST` / `YAADEIN_PORT` | `127.0.0.1` / `8899` | where the daemon listens |
+| `YAADEIN_OLLAMA_URL` | `http://localhost:11434` | Ollama endpoint |
+| `YAADEIN_LLM_MODEL` / `YAADEIN_EMBED_MODEL` | `gemma4` / `nomic-embed-text` | extraction LLM / embedder |
+| `YAADEIN_DATA_DIR` | `./memory_store` | where the brain lives |
+| `YAADEIN_WATCH_INTERVAL` | `30` | watcher sweep seconds (0 = off) |
+| `YAADEIN_WATCH_SOURCES` | Claude Code + Kiro | JSON list of watch sources (below) |
+| `YAADEIN_TOP_K`, `YAADEIN_MAX_PER_SESSION`, `YAADEIN_CONFIDENCE_FLOOR`, `YAADEIN_REINFORCE_THRESHOLD`, `YAADEIN_TRANSCRIPT_MAX_CHARS` | see config.py | recall & gate tuning |
+
+**Watch sources** make harness support pluggable. Each source names a
+transcript directory, a glob, a harness label, and a transcript `format`:
+
+```json
+[{"root": "~/.claude/projects", "glob": "*/*.jsonl",
+  "harness": "claude-code", "format": "claude-jsonl"}]
+```
+
+Formats map to parsers in `yaadein/transcript.py` (`PARSERS`). A source
+whose format has no parser yet is skipped with a warning at startup — the
+Kiro source ships pre-configured and lights up automatically the day a
+`kiro-sessions` parser is registered. **Adding a new harness = one parser
+function + one registry line + one source entry.**
 
 ## Architecture in one paragraph
 

@@ -20,7 +20,7 @@ def test_extract_queues_background_extraction(tmp_path, monkeypatch):
     })
     assert resp.status_code == 200
     assert resp.json()["status"] == "queued"
-    assert calls == [(str(transcript), "/some/repo", "sess-1", "claude-code")]
+    assert calls == [(str(transcript), "/some/repo", "sess-1", "claude-code", "claude-jsonl")]
 
 
 def test_extract_404_for_missing_transcript(tmp_path):

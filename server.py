@@ -15,9 +15,15 @@ from mcp.server import Server
 from mcp.server.sse import SseServerTransport
 from pydantic import BaseModel
 
-from config import MEMORY_WATCH_INTERVAL_SECONDS, MEMORY_WATCH_ROOT
+from config import (
+    MEMORY_WATCH_INTERVAL_SECONDS,
+    MEMORY_WATCH_SOURCES,
+    SERVER_HOST,
+    SERVER_PORT,
+)
 from yaadein.mcp_tools import handle_memory_tool, is_memory_tool, memory_tool_definitions
 from yaadein.service import get_memory_service
+from yaadein.transcript import get_parser
 from yaadein.watcher import find_recent_transcripts, sniff_project_path
 
 app = FastAPI(title="Yaadein")
@@ -34,24 +40,47 @@ async def start_transcript_watcher():
     if MEMORY_WATCH_INTERVAL_SECONDS <= 0:
         return
 
+    log = logging.getLogger(__name__)
+    active_sources = []
+    for source in MEMORY_WATCH_SOURCES:
+        if get_parser(source["format"]) is None:
+            log.warning(
+                "watch source %s (%s) skipped: no parser for format '%s' yet",
+                source["harness"], source["root"], source["format"],
+            )
+            continue
+        active_sources.append(source)
+    log.info(
+        "transcript watcher: every %ss, sources: %s",
+        MEMORY_WATCH_INTERVAL_SECONDS,
+        ", ".join(s["harness"] for s in active_sources) or "none",
+    )
+    if not active_sources:
+        return
+
     async def watch_loop():
-        log = logging.getLogger(__name__)
         while True:
             await asyncio.sleep(MEMORY_WATCH_INTERVAL_SECONDS)
-            try:
-                candidates = find_recent_transcripts(
-                    MEMORY_WATCH_ROOT, MEMORY_WATCH_INTERVAL_SECONDS * 2
-                )
-                for transcript in candidates:
-                    await asyncio.to_thread(
-                        _run_extraction,
-                        str(transcript),
-                        sniff_project_path(transcript),
-                        transcript.stem,
-                        "claude-code",
+            for source in active_sources:
+                try:
+                    candidates = find_recent_transcripts(
+                        Path(source["root"]),
+                        MEMORY_WATCH_INTERVAL_SECONDS * 2,
+                        glob=source["glob"],
                     )
-            except Exception:
-                log.exception("transcript watcher cycle failed")
+                    for transcript in candidates:
+                        await asyncio.to_thread(
+                            _run_extraction,
+                            str(transcript),
+                            sniff_project_path(transcript),
+                            transcript.stem,
+                            source["harness"],
+                            source["format"],
+                        )
+                except Exception:
+                    log.exception(
+                        "watcher cycle failed for source %s", source["harness"]
+                    )
 
     asyncio.create_task(watch_loop())
 
@@ -66,6 +95,7 @@ class ExtractRequest(BaseModel):
     project_path: Optional[str] = None
     session_id: Optional[str] = None
     harness: str = "claude-code"
+    format: str = "claude-jsonl"
 
 
 def _run_extraction(
@@ -73,6 +103,7 @@ def _run_extraction(
     project_path: Optional[str],
     session_id: Optional[str],
     harness: str,
+    transcript_format: str = "claude-jsonl",
 ) -> None:
     from yaadein.extractor import build_extractor
 
@@ -83,6 +114,7 @@ def _run_extraction(
             source_harness=harness,
             project_path=project_path,
             session_id=session_id,
+            transcript_format=transcript_format,
         )
         level = logging.WARNING if result.error else logging.INFO
         log.log(
@@ -103,7 +135,8 @@ async def memory_extract(req: ExtractRequest, background_tasks: BackgroundTasks)
             content={"error": f"Transcript not found: {req.transcript_path}"},
         )
     background_tasks.add_task(
-        _run_extraction, str(path), req.project_path, req.session_id, req.harness
+        _run_extraction, str(path), req.project_path, req.session_id,
+        req.harness, req.format,
     )
     return {"status": "queued", "transcript": str(path)}
 
@@ -154,4 +187,4 @@ if __name__ == "__main__":
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    uvicorn.run(app, host="127.0.0.1", port=8899)
+    uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT)

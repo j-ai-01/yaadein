@@ -75,3 +75,28 @@ def test_skips_entry_with_non_dict_message(tmp_path):
         user_str("real question"),
     ])
     assert parse_transcript(p) == [Turn("user", "real question")]
+
+
+def test_parser_registry_knows_claude_jsonl():
+    from yaadein.transcript import get_parser, parse_transcript
+    assert get_parser("claude-jsonl") is parse_transcript
+    assert get_parser("kiro-sessions") is None
+
+
+def test_extractor_rejects_unknown_format_gracefully(tmp_path):
+    from yaadein.extractor import Extractor
+
+    class NeverCalledGenerator:
+        def generate(self, prompt):
+            raise AssertionError("must not reach the LLM")
+
+    transcript = tmp_path / "s.jsonl"
+    transcript.write_text("{}")
+    extractor = Extractor(
+        service=None,  # never touched: format check happens first
+        generator=NeverCalledGenerator(),
+        extract_log=tmp_path / ".extracted.json",
+    )
+    result = extractor.extract(transcript, transcript_format="kiro-sessions")
+    assert result.error is not None
+    assert "kiro-sessions" in result.error

@@ -59,3 +59,17 @@ def transcript_text(turns: List[Turn], max_chars: int) -> str:
     tail = text[-max_chars:]
     newline = tail.find("\n")
     return tail[newline + 1:] if newline != -1 else tail
+
+
+# Registry of transcript formats the extractor understands. Supporting a new
+# harness = write a parser returning List[Turn], register it here, and add a
+# watch source for it in config.py. Sources whose format has no parser yet
+# are skipped with a warning instead of crashing.
+PARSERS = {
+    "claude-jsonl": parse_transcript,
+    # "kiro-sessions": parse_kiro_sessions,  # pending real Kiro session data
+}
+
+
+def get_parser(format_name: str):
+    return PARSERS.get(format_name)

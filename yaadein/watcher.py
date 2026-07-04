@@ -5,7 +5,10 @@ from typing import List, Optional
 
 
 def find_recent_transcripts(
-    root: Path, active_within_seconds: int, now: Optional[float] = None
+    root: Path,
+    active_within_seconds: int,
+    now: Optional[float] = None,
+    glob: str = "*/*.jsonl",
 ) -> List[Path]:
     """Transcripts modified recently enough to be an active (or just-ended) session."""
     if not root.exists():
@@ -14,7 +17,7 @@ def find_recent_transcripts(
         now = time.time()
     cutoff = now - active_within_seconds
     return sorted(
-        path for path in root.glob("*/*.jsonl") if path.stat().st_mtime >= cutoff
+        path for path in root.glob(glob) if path.stat().st_mtime >= cutoff
     )
 
 

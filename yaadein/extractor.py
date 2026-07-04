@@ -10,7 +10,7 @@ from yaadein.llm import TextGenerator
 from yaadein.redact import redact
 from yaadein.scopes import USER_SCOPE_KEY, resolve_project_key
 from yaadein.service import MemoryService
-from yaadein.transcript import parse_transcript, transcript_text
+from yaadein.transcript import get_parser, transcript_text
 from yaadein.types import Candidate
 from utils.file_hash import file_hash
 from utils.ingest_tracker import load_ingested, save_ingested
@@ -100,13 +100,20 @@ class Extractor:
         source_harness: str = "claude-code",
         project_path: Optional[str] = None,
         session_id: Optional[str] = None,
+        transcript_format: str = "claude-jsonl",
     ) -> ExtractionResult:
+        parser = get_parser(transcript_format)
+        if parser is None:
+            return ExtractionResult(
+                error=f"no parser registered for transcript format '{transcript_format}'"
+            )
+
         transcript_hash = file_hash(transcript_path)
         processed = load_ingested(self._extract_log)
         if processed.get(str(transcript_path)) == transcript_hash:
             return ExtractionResult(already_processed=True)
 
-        turns = parse_transcript(transcript_path)
+        turns = parser(transcript_path)
         text = transcript_text(turns, MEMORY_TRANSCRIPT_MAX_CHARS)
         if not text.strip():
             self._mark_processed(processed, transcript_path, transcript_hash)
