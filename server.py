@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -14,10 +15,45 @@ from mcp.server import Server
 from mcp.server.sse import SseServerTransport
 from pydantic import BaseModel
 
+from config import MEMORY_WATCH_INTERVAL_SECONDS, MEMORY_WATCH_ROOT
 from yaadein.mcp_tools import handle_memory_tool, is_memory_tool, memory_tool_definitions
 from yaadein.service import get_memory_service
+from yaadein.watcher import find_recent_transcripts, sniff_project_path
 
 app = FastAPI(title="Yaadein")
+
+
+@app.on_event("startup")
+async def start_transcript_watcher():
+    """Near-real-time extraction: periodically re-mine active transcripts.
+
+    Safe because extraction is idempotent per content hash and near-duplicate
+    facts reinforce instead of duplicating. Complements the SessionEnd hook,
+    which still gives the immediate final pass when a session closes.
+    """
+    if MEMORY_WATCH_INTERVAL_SECONDS <= 0:
+        return
+
+    async def watch_loop():
+        log = logging.getLogger(__name__)
+        while True:
+            await asyncio.sleep(MEMORY_WATCH_INTERVAL_SECONDS)
+            try:
+                candidates = find_recent_transcripts(
+                    MEMORY_WATCH_ROOT, MEMORY_WATCH_INTERVAL_SECONDS * 2
+                )
+                for transcript in candidates:
+                    await asyncio.to_thread(
+                        _run_extraction,
+                        str(transcript),
+                        sniff_project_path(transcript),
+                        transcript.stem,
+                        "claude-code",
+                    )
+            except Exception:
+                log.exception("transcript watcher cycle failed")
+
+    asyncio.create_task(watch_loop())
 
 
 @app.get("/health")

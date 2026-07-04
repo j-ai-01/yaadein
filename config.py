@@ -24,3 +24,10 @@ MEMORY_REINFORCE_THRESHOLD = 0.9
 # (code-heavy text runs ~3 chars/token)
 MEMORY_TRANSCRIPT_MAX_CHARS = 16000
 MEMORY_EXTRACT_LOG = MEMORY_DIR / ".extracted.json"
+
+# ── Transcript watcher (near-real-time extraction) ────────
+# Every interval, re-mine transcripts modified within 2x the interval.
+# Safe to re-run: unchanged files are hash-skipped, known facts reinforce.
+# Set interval to 0 to disable the watcher entirely.
+MEMORY_WATCH_ROOT = Path.home() / ".claude" / "projects"
+MEMORY_WATCH_INTERVAL_SECONDS = 300

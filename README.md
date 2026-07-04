@@ -177,6 +177,21 @@ verbatim evidence quote and source session id attached.
 bearer tokens, private-key blocks, `password=`/`api_key=`-style assignments,
 high-entropy strings) *before* the LLM ever sees the text.
 
+### Near-real-time extraction (the watcher)
+
+You don't have to wait for a session to end. Every 5 minutes
+(`MEMORY_WATCH_INTERVAL_SECONDS` in config.py; 0 disables) the daemon sweeps
+`~/.claude/projects/` for transcripts modified in the last 10 minutes and
+re-mines them. This is safe by construction: unchanged transcripts are
+skipped by content hash, and facts the LLM re-derives *reinforce* the
+existing memory instead of duplicating it. So during a long working session
+your memories stay at most ~5 minutes behind the conversation — and the
+SessionEnd hook still provides the immediate final pass at close.
+
+Deliberately **not** per-message: mid-thought extraction memorizes ideas you
+were about to discard, and keeps the LLM running constantly. Minutes-fresh
+is the sweet spot; end-of-session is the safety net.
+
 ### Manual extraction
 
 Mine any transcript on demand (useful for sessions that ended while the
@@ -280,7 +295,6 @@ memories and measure.
 - **Lifecycle engine:** contradiction chains (new facts supersede old, with
   human-in-the-loop for confirmed conflicts), promote/decay from usage.
 - **Inspector CLI:** `yaad list | show | confirm | conflicts`.
-- **Transcript watcher:** polling fallback for harnesses without hooks.
 - **Full BM25 in recall** — deliberately deferred (YAGNI): today's recall is
   semantic search + a keyword bonus, which is plenty at one-sentence-fact
   scale. Upgrade trigger: exact-keyword memories ranking below fuzzy
