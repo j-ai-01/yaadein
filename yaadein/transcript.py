@@ -1,0 +1,61 @@
+import json
+from dataclasses import dataclass
+from pathlib import Path
+from typing import List
+
+
+@dataclass
+class Turn:
+    role: str  # "user" | "assistant"
+    text: str
+
+
+def _text_from_blocks(blocks, include_tools: bool) -> str:
+    parts = []
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        if block.get("type") == "text":
+            text = (block.get("text") or "").strip()
+            if text:
+                parts.append(text)
+        elif block.get("type") == "tool_use" and include_tools:
+            parts.append(f"[tool: {block.get('name', 'unknown')}]")
+    return " ".join(parts)
+
+
+def parse_transcript(path: Path) -> List[Turn]:
+    turns: List[Turn] = []
+    for line in path.read_text().splitlines():
+        try:
+            entry = json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if not isinstance(entry, dict) or entry.get("type") not in ("user", "assistant"):
+            continue
+        message = entry.get("message") or {}
+        if not isinstance(message, dict):
+            continue
+        content = message.get("content")
+        role = entry["type"]
+        if isinstance(content, str):
+            text = content.strip()
+            if role == "user" and text.startswith("<"):
+                continue  # harness-injected reminders/commands, not user speech
+        elif isinstance(content, list):
+            text = _text_from_blocks(content, include_tools=(role == "assistant"))
+        else:
+            continue
+        if text:
+            turns.append(Turn(role, text))
+    return turns
+
+
+def transcript_text(turns: List[Turn], max_chars: int) -> str:
+    lines = [f"{turn.role.upper()}: {turn.text}" for turn in turns]
+    text = "\n".join(lines)
+    if len(text) <= max_chars:
+        return text
+    tail = text[-max_chars:]
+    newline = tail.find("\n")
+    return tail[newline + 1:] if newline != -1 else tail

@@ -1,0 +1,6 @@
+{"type": "user", "message": {"role": "user", "content": "Let's add tests to this repo. I prefer pytest over unittest - way less boilerplate."}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "Agreed, pytest it is. I'll set up the test directory."}]}}
+{"type": "user", "message": {"role": "user", "content": "Also heads up: the staging deploy fails unless you export AWS_REGION=us-east-1 first. Bit us twice this week."}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "Good to know - that is a classic gotcha. I'll note it in the runbook."}]}}
+{"type": "user", "message": {"role": "user", "content": "What time is it?"}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "I cannot check the clock, but your terminal can: run date."}]}}

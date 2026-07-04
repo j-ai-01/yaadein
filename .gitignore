@@ -1,0 +1,33 @@
+# ── Python ────────────────────────────────────────────────
+venv/
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+
+# ── Test / coverage ───────────────────────────────────────
+.pytest_cache/
+.coverage
+
+# ── Environment ───────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── OS / editor ───────────────────────────────────────────
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# ── Tooling (local dev, not part of the project) ──────────
+.claude/
+.superpowers/
+
+# ── User data (memories never leave your machine) ─────────
+memory_store/
+
+# ── Logs ──────────────────────────────────────────────────
+*.log
+logs/
