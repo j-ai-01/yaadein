@@ -153,7 +153,10 @@ class Extractor:
                 error=f"no parser registered for transcript format '{transcript_format}'"
             )
 
-        transcript_hash = file_hash(transcript_path)
+        try:
+            transcript_hash = file_hash(transcript_path)
+        except FileNotFoundError:
+            return ExtractionResult(error=f"transcript file not found: {transcript_path}")
         processed = load_ingested(self._extract_log)
         record = processed.get(str(transcript_path))
         if isinstance(record, str):  # legacy format: bare hash, no bookmark
