@@ -1,3 +1,8 @@
+"""Yaadein daemon entrypoint: a FastAPI app that hosts the MCP server (SSE
+transport) exposing the four memory tools, plus an HTTP `/memory/extract`
+endpoint and a background transcript watcher that drive automatic extraction.
+"""
+
 import asyncio
 import json
 import logging
@@ -87,10 +92,13 @@ async def start_transcript_watcher():
 
 @app.get("/health")
 async def health():
+    """Liveness check for the daemon."""
     return {"status": "ok"}
 
 
 class ExtractRequest(BaseModel):
+    """Body for POST /memory/extract: identifies a transcript to mine and how to parse it."""
+
     transcript_path: str
     project_path: Optional[str] = None
     session_id: Optional[str] = None
@@ -105,6 +113,11 @@ def _run_extraction(
     harness: str,
     transcript_format: str = "claude-jsonl",
 ) -> None:
+    """Run the extraction pipeline for one transcript and log the outcome.
+
+    Meant to be invoked off the request path (background task or watcher loop);
+    swallows and logs all exceptions so a bad transcript never crashes the caller.
+    """
     from yaadein.extractor import build_extractor
 
     log = logging.getLogger(__name__)
@@ -128,6 +141,11 @@ def _run_extraction(
 
 @app.post("/memory/extract")
 async def memory_extract(req: ExtractRequest, background_tasks: BackgroundTasks):
+    """Queue extraction for a transcript (called by the SessionEnd hook or manually).
+
+    Returns immediately with status "queued"; the actual extraction runs in a
+    background task via `_run_extraction`.
+    """
     path = Path(req.transcript_path).expanduser().resolve()
     if not path.exists():
         return JSONResponse(
@@ -147,11 +165,15 @@ sse = SseServerTransport("/messages")
 
 @server.list_tools()
 async def handle_list_tools() -> list[types.Tool]:
+    """MCP tool discovery: advertise the four memory tools to connecting agents."""
     return memory_tool_definitions()
 
 
 @server.call_tool()
 async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[types.TextContent]:
+    """MCP tool dispatch: route a tool call to the memory service, lazily
+    initializing it so a missing dependency (e.g. Ollama down) surfaces as a
+    tool error rather than a startup crash."""
     if is_memory_tool(name):
         try:
             service = get_memory_service()
@@ -167,6 +189,8 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[types.T
 
 @app.get("/sse")
 async def handle_sse(request: Request):
+    """MCP-over-SSE entrypoint: opens the event stream agents connect to and
+    hands it off to the MCP server's protocol loop."""
     async with sse.connect_sse(request.scope, request.receive, request._send) as streams:
         await server.run(
             streams[0],

@@ -1,3 +1,9 @@
+"""SQLite-backed CRUD layer for memories: the source of truth for content,
+scope, status, confidence, and provenance, with every mutation appended to an
+audit log. Chroma (vector_index.py) only ever stores embeddings keyed by the
+same memory id — this module is where memories actually live.
+"""
+
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -16,19 +22,25 @@ _COLUMNS = [
 
 
 def _now() -> str:
+    """Current UTC timestamp in ISO 8601 format, used for all stored timestamps."""
     return datetime.now(timezone.utc).isoformat()
 
 
 def _row_to_memory(row: sqlite3.Row) -> Memory:
+    """Convert a raw sqlite3.Row from the memories table into a Memory dataclass."""
     return Memory(**{col: row[col] for col in _COLUMNS})
 
 
 class MemoryStore:
+    """Owns the SQLite connection and is the sole writer/reader of the
+    memories and audit_log tables. Every mutating method records an audit entry."""
+
     def __init__(self, db_path: Path):
         self._conn = connect(db_path)
         migrate(self._conn)
 
     def add(self, memory: Memory) -> Memory:
+        """Insert a new memory, assigning an id and created_at if not already set."""
         if not memory.id:
             memory.id = f"mem_{uuid.uuid4().hex[:12]}"
         if not memory.created_at:
@@ -44,6 +56,7 @@ class MemoryStore:
         return memory
 
     def get(self, memory_id: str) -> Optional[Memory]:
+        """Fetch one memory by id, or None if it doesn't exist."""
         row = self._conn.execute(
             "SELECT * FROM memories WHERE id = ?", (memory_id,)
         ).fetchone()
@@ -55,6 +68,8 @@ class MemoryStore:
         scope_key: Optional[str] = None,
         status: Optional[str] = None,
     ) -> List[Memory]:
+        """List memories matching any combination of scope_type, scope_key, and
+        status filters (all optional; omitted filters are not applied)."""
         clauses, params = [], []
         for col, val in (
             ("scope_type", scope_type), ("scope_key", scope_key), ("status", status)
@@ -69,6 +84,7 @@ class MemoryStore:
         return [_row_to_memory(r) for r in rows]
 
     def record_retrieval(self, memory_ids: List[str]) -> None:
+        """Bump times_retrieved and last_retrieved for each memory, e.g. after a recall/briefing."""
         ts = _now()
         for memory_id in memory_ids:
             self._conn.execute(
@@ -80,6 +96,7 @@ class MemoryStore:
         self._conn.commit()
 
     def set_status(self, memory_id: str, status: str) -> None:
+        """Transition a memory's status (e.g. proposed -> confirmed -> archived)."""
         self._conn.execute(
             "UPDATE memories SET status = ? WHERE id = ?", (status, memory_id)
         )
@@ -87,6 +104,8 @@ class MemoryStore:
         self._conn.commit()
 
     def reinforce(self, memory_id: str, source_session: Optional[str] = None) -> None:
+        """Nudge confidence up (capped at 1.0) when a near-duplicate fact
+        reappears, instead of writing a second memory."""
         self._conn.execute(
             "UPDATE memories SET confidence = MIN(1.0, confidence + 0.1) WHERE id = ?",
             (memory_id,),
@@ -95,6 +114,7 @@ class MemoryStore:
         self._conn.commit()
 
     def forget(self, memory_id: str) -> bool:
+        """Permanently delete a memory. Returns False if the id didn't exist."""
         cursor = self._conn.execute(
             "DELETE FROM memories WHERE id = ?", (memory_id,)
         )
@@ -105,14 +125,17 @@ class MemoryStore:
         return True
 
     def audit_entries(self) -> List[sqlite3.Row]:
+        """Return the full audit log, oldest first."""
         return self._conn.execute(
             "SELECT * FROM audit_log ORDER BY id"
         ).fetchall()
 
     def close(self) -> None:
+        """Close the underlying SQLite connection."""
         self._conn.close()
 
     def _audit(self, action: str, memory_id: Optional[str], detail: Optional[str]) -> None:
+        """Append one row to audit_log; called by every mutating method above."""
         self._conn.execute(
             "INSERT INTO audit_log (ts, action, memory_id, detail) VALUES (?, ?, ?, ?)",
             (_now(), action, memory_id, detail),

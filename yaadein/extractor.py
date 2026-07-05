@@ -1,3 +1,12 @@
+"""The extraction pipeline orchestrator: parse -> redact -> distill (LLM) ->
+quality gates -> write as `proposed` (or reinforce an existing near-duplicate).
+
+Idempotent per transcript content-hash, and incremental via a per-transcript
+turn "bookmark" so re-mining a growing transcript only distills turns added
+since the last successful pass — never re-reads or re-derives facts from
+turns already seen.
+"""
+
 import json
 import logging
 from dataclasses import dataclass, field
@@ -81,6 +90,10 @@ def _parse_candidates(raw: str) -> Optional[List[Candidate]]:
 
 @dataclass
 class ExtractionResult:
+    """Outcome of one `Extractor.extract()` call: ids written as new proposed
+    memories, ids reinforced instead, how many candidates were gated out,
+    whether the transcript was already fully processed, and any pipeline error."""
+
     written: List[str] = field(default_factory=list)
     reinforced: List[str] = field(default_factory=list)
     skipped: int = 0
@@ -89,6 +102,10 @@ class ExtractionResult:
 
 
 class Extractor:
+    """Runs the full pipeline for a single transcript: parse, redact, distill
+    via the LLM, gate, and write/reinforce — tracking progress in extract_log
+    so re-runs are idempotent and incremental."""
+
     def __init__(self, service: MemoryService, generator: TextGenerator, extract_log: Path):
         self._service = service
         self._generator = generator
@@ -102,6 +119,14 @@ class Extractor:
         session_id: Optional[str] = None,
         transcript_format: str = "claude-jsonl",
     ) -> ExtractionResult:
+        """Mine one transcript for durable facts and write survivors as
+        proposed memories (or reinforce existing near-duplicates).
+
+        Idempotent: if the transcript's content hash matches the last
+        successful run, returns immediately with already_processed=True.
+        Incremental: only turns after the last run's bookmark are distilled,
+        so growing transcripts don't get re-mined from the start each time.
+        """
         parser = get_parser(transcript_format)
         if parser is None:
             return ExtractionResult(
@@ -179,12 +204,17 @@ class Extractor:
     def _mark_processed(
         self, processed: dict, path: Path, transcript_hash: str, turns_seen: int
     ) -> None:
+        """Record this transcript's content hash and turn-count bookmark in the
+        extract log, so the next run can skip unchanged transcripts and resume
+        distillation after turns_seen."""
         processed[str(path)] = {"hash": transcript_hash, "turns": turns_seen}
         self._extract_log.parent.mkdir(parents=True, exist_ok=True)
         save_ingested(processed, self._extract_log)
 
 
 def build_extractor() -> "Extractor":
+    """Construct a production Extractor wired to the singleton MemoryService
+    and a fresh OllamaGenerator, using config.MEMORY_EXTRACT_LOG for bookkeeping."""
     from config import MEMORY_EXTRACT_LOG
     from yaadein.llm import OllamaGenerator
     from yaadein.service import get_memory_service

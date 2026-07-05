@@ -1,3 +1,13 @@
+"""Central configuration for the Yaadein daemon: server, models, storage paths,
+and extraction-pipeline knobs.
+
+Every setting has a hardcoded default here and can be overridden without code
+changes by exporting an environment variable named `YAADEIN_<NAME>` (e.g.
+`YAADEIN_PORT=9000`, `YAADEIN_CONFIDENCE_FLOOR=0.7`). This lets deployments
+tune behavior (ports, model choice, extraction thresholds, watch sources)
+purely through the environment.
+"""
+
 import json
 import os
 from pathlib import Path
@@ -6,14 +16,17 @@ BASE_DIR = Path(__file__).parent
 
 
 def _env(name: str, default: str) -> str:
+    """Read `YAADEIN_<name>` from the environment, falling back to `default`."""
     return os.environ.get(f"YAADEIN_{name}", default)
 
 
 def _env_int(name: str, default: int) -> int:
+    """Read `YAADEIN_<name>` from the environment as an int, falling back to `default`."""
     return int(os.environ.get(f"YAADEIN_{name}", str(default)))
 
 
 def _env_float(name: str, default: float) -> float:
+    """Read `YAADEIN_<name>` from the environment as a float, falling back to `default`."""
     return float(os.environ.get(f"YAADEIN_{name}", str(default)))
 
 

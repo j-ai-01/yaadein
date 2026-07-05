@@ -1,3 +1,10 @@
+"""MCP tool surface for agents: definitions (name, description, JSON schema)
+for the four memory tools plus the synchronous dispatch that turns a tool
+call into a MemoryService call. Tool descriptions here are prompts the
+connecting agent reads to decide when to call each tool, so their wording is
+as load-bearing as the code.
+"""
+
 import json
 import logging
 from typing import Optional
@@ -13,10 +20,15 @@ _MEMORY_TOOLS = {"remember", "recall_memory", "forget_memory", "memory_briefing"
 
 
 def is_memory_tool(name: str) -> bool:
+    """Whether `name` is one of Yaadein's four memory tools."""
     return name in _MEMORY_TOOLS
 
 
 def memory_tool_definitions() -> list:
+    """MCP tool definitions (name, description, input schema) for
+    remember/recall_memory/forget_memory/memory_briefing, advertised to agents
+    via list_tools. Descriptions are written for the calling agent, not humans —
+    they steer when and how it invokes each tool."""
     return [
         types.Tool(
             name="recall_memory",
@@ -100,6 +112,10 @@ def memory_tool_definitions() -> list:
 def handle_memory_tool(
     name: str, arguments: dict, service: MemoryService
 ) -> Optional[str]:
+    """Synchronously execute a memory tool call and return its JSON-string
+    result, or None if `name` isn't a memory tool. Errors (missing args or any
+    exception from the service) are caught and returned as a JSON error object
+    rather than raised, so a bad call never breaks the MCP session."""
     if name not in _MEMORY_TOOLS:
         return None
     try:
@@ -112,11 +128,15 @@ def handle_memory_tool(
 
 
 def _project_key(arguments: dict) -> Optional[str]:
+    """Resolve the tool call's optional project_path into a scope key, or None
+    if the call didn't include one (i.e. user-scoped)."""
     path = arguments.get("project_path")
     return resolve_project_key(path) if path else None
 
 
 def _dispatch(name: str, arguments: dict, service: MemoryService) -> object:
+    """Route a tool name/arguments pair to the matching MemoryService call and
+    return its (JSON-serializable) result."""
     if name == "remember":
         content = arguments["content"]
         project_key = _project_key(arguments)

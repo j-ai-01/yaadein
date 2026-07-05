@@ -1,3 +1,11 @@
+"""SQLite schema and migrations for the memory store.
+
+SQLite is the source of truth for memories: content, category, scope, status
+(proposed -> confirmed -> archived), confidence, provenance, and the audit
+log. Chroma (see vector_index.py) only holds embeddings alongside the same
+ids for semantic search; SQLite decides what a memory means and is.
+"""
+
 import sqlite3
 from pathlib import Path
 
@@ -41,6 +49,8 @@ MIGRATIONS = [
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
+    """Open (creating parent dirs as needed) the shared SQLite connection used
+    by the whole process, with row access by column name."""
     db_path.parent.mkdir(parents=True, exist_ok=True)
     # check_same_thread=False: this connection is shared as a singleton and used
     # from background threadpool threads (e.g. extraction). CPython's sqlite3
@@ -53,6 +63,7 @@ def connect(db_path: Path) -> sqlite3.Connection:
 
 
 def schema_version(conn: sqlite3.Connection) -> int:
+    """Return the currently applied migration index, or 0 if none have run yet."""
     row = conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version'"
     ).fetchone()
@@ -63,6 +74,7 @@ def schema_version(conn: sqlite3.Connection) -> int:
 
 
 def migrate(conn: sqlite3.Connection) -> None:
+    """Apply any migrations in MIGRATIONS newer than the connection's current version, in order."""
     conn.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)")
     current = schema_version(conn)
     for i, migration in enumerate(MIGRATIONS[current:], start=current + 1):

@@ -1,3 +1,9 @@
+"""Support for the near-real-time transcript watcher (see server.py's
+start_transcript_watcher): finds recently-modified transcripts across
+configured watch sources, and sniffs a transcript's project cwd so extraction
+can be scoped correctly without the caller having to supply it.
+"""
+
 import json
 import time
 from pathlib import Path

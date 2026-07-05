@@ -1,3 +1,5 @@
+"""Factory for a telemetry-silenced Chroma PersistentClient."""
+
 import io
 import contextlib
 import chromadb

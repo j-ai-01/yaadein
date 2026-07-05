@@ -1,3 +1,10 @@
+"""Secret scrubbing applied to transcript text BEFORE it is ever sent to an
+LLM for distillation. Combines known-pattern matching (key/token formats)
+with a high-entropy fallback for anything pattern matching misses. Tuned
+deliberately toward false positives over false negatives: a secret leaking
+into an LLM prompt is worse than some harmless text getting redacted.
+"""
+
 import math
 import re
 
@@ -17,6 +24,8 @@ _CANDIDATE_TOKEN = re.compile(r"\S{28,}")
 
 
 def _entropy(s: str) -> float:
+    """Shannon entropy of `s` in bits per character, used to flag
+    random-looking (likely secret) tokens that pattern matching missed."""
     counts = {c: s.count(c) for c in set(s)}
     return -sum((n / len(s)) * math.log2(n / len(s)) for n in counts.values())
 
@@ -28,6 +37,8 @@ def _entropy(s: str) -> float:
 # through) is a security failure, while a false positive (over-redacting
 # harmless text) only costs some readability. When in doubt, redact.
 def _looks_like_secret(token: str) -> bool:
+    """High-entropy fallback check: a long alphanumeric token not shaped like a
+    path/URL, with entropy above the threshold, is treated as a likely secret."""
     if "/" in token or "\\" in token:
         return False  # paths and URLs
     has_digit = any(c.isdigit() for c in token)
@@ -36,6 +47,9 @@ def _looks_like_secret(token: str) -> bool:
 
 
 def redact(text: str) -> str:
+    """Scrub `text` of known secret formats (keys, tokens, bearer auth,
+    key=value credential assignments) then sweep remaining long tokens through
+    the entropy heuristic. Call this on every transcript before it reaches an LLM."""
     for pattern, replacement in _PATTERNS:
         text = pattern.sub(replacement, text)
     return _CANDIDATE_TOKEN.sub(

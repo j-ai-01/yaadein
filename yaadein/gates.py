@@ -1,3 +1,10 @@
+"""Quality gates the extractor's raw LLM candidates must pass before becoming
+memories: this is the hallucination defense for the pipeline. Enforces
+grounding (the evidence quote must appear verbatim in the transcript),
+per-session budget, a confidence floor, valid category/scope, content length
+bounds, and in-batch de-duplication.
+"""
+
 from typing import List
 
 from config import MEMORY_CONFIDENCE_FLOOR, MEMORY_MAX_PER_SESSION
@@ -10,10 +17,15 @@ _MAX_CONTENT_CHARS = 300
 
 
 def _normalize(text: str) -> str:
+    """Collapse whitespace and lowercase, so grounding/dedup comparisons ignore
+    formatting differences."""
     return " ".join(text.split()).lower()
 
 
 def _passes(candidate: Candidate, normalized_transcript: str) -> bool:
+    """Whether one candidate clears every individual gate: valid category and
+    scope, confidence at or above the floor, content within length bounds, and
+    its evidence quote actually appearing in the transcript (grounding)."""
     if candidate.category not in VALID_CATEGORIES:
         return False
     if candidate.scope not in VALID_SCOPES:
@@ -28,6 +40,9 @@ def _passes(candidate: Candidate, normalized_transcript: str) -> bool:
 
 
 def apply_gates(candidates: List[Candidate], transcript: str) -> List[Candidate]:
+    """Filter and cap raw extraction candidates: drop any that fail `_passes`,
+    drop in-batch duplicates by normalized content, keep only the top
+    MEMORY_MAX_PER_SESSION survivors ranked by confidence."""
     normalized_transcript = _normalize(transcript)
     survivors, seen = [], set()
     for candidate in candidates:

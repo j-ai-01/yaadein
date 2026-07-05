@@ -1,3 +1,10 @@
+"""Transcript parsing for the extraction pipeline: turns a harness-specific
+session log into a flat list of (role, text) Turns the LLM can read, plus the
+PARSERS registry mapping a config-declared format name to its parser
+function, and the tail-truncation helper that keeps transcripts within the
+LLM's context window.
+"""
+
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -6,11 +13,15 @@ from typing import List
 
 @dataclass
 class Turn:
+    """One user or assistant utterance extracted from a transcript."""
+
     role: str  # "user" | "assistant"
     text: str
 
 
 def _text_from_blocks(blocks, include_tools: bool) -> str:
+    """Flatten a message's content blocks into one string, keeping only text
+    blocks (and, for assistant turns, a `[tool: name]` marker for tool_use blocks)."""
     parts = []
     for block in blocks:
         if not isinstance(block, dict):
@@ -25,6 +36,9 @@ def _text_from_blocks(blocks, include_tools: bool) -> str:
 
 
 def parse_transcript(path: Path) -> List[Turn]:
+    """Parse a Claude Code JSONL transcript into user/assistant Turns, skipping
+    malformed lines, non-message entries, and harness-injected reminders
+    (user text starting with "<")."""
     turns: List[Turn] = []
     for line in path.read_text().splitlines():
         try:
@@ -52,6 +66,9 @@ def parse_transcript(path: Path) -> List[Turn]:
 
 
 def transcript_text(turns: List[Turn], max_chars: int) -> str:
+    """Render turns as "ROLE: text" lines joined by newlines, tail-truncated to
+    max_chars (keeping the most recent conversation, snapped to a line boundary)
+    so the distillation prompt fits the LLM's context window."""
     lines = [f"{turn.role.upper()}: {turn.text}" for turn in turns]
     text = "\n".join(lines)
     if len(text) <= max_chars:
@@ -72,4 +89,6 @@ PARSERS = {
 
 
 def get_parser(format_name: str):
+    """Look up the parser function registered for `format_name`, or None if
+    no parser exists yet for that transcript format."""
     return PARSERS.get(format_name)
