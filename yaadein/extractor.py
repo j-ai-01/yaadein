@@ -40,6 +40,10 @@ Do NOT extract:
 - anything derivable by reading the code itself
 - vague observations about the user
 
+IMPORTANT: keep proper names IN the facts. If a project, tool, person, or
+idea has a name in the transcript (e.g. a project called "Kyun"), the fact
+must include that name — a fact that loses its name becomes unfindable.
+
 Return a JSON array and nothing else. Each item:
 {{"content": "<one distilled fact, a single sentence>", \
 "category": "preference|decision|fact|gotcha", \
