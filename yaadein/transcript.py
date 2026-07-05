@@ -65,6 +65,54 @@ def parse_transcript(path: Path) -> List[Turn]:
     return turns
 
 
+def _text_from_codex_content(content, text_types: set[str]) -> str:
+    """Flatten Codex message content blocks, keeping only visible text."""
+    if isinstance(content, str):
+        return content.strip()
+    if not isinstance(content, list):
+        return ""
+    parts = []
+    for block in content:
+        if not isinstance(block, dict) or block.get("type") not in text_types:
+            continue
+        text = (block.get("text") or "").strip()
+        if text:
+            parts.append(text)
+    return " ".join(parts)
+
+
+def parse_codex_transcript(path: Path) -> List[Turn]:
+    """Parse Codex Desktop JSONL sessions into user/assistant Turns.
+
+    Codex logs contain both structured response items and event messages, often
+    duplicating user/assistant text. Use only `response_item` message payloads
+    so each turn is seen once, and skip developer/system/context payloads.
+    """
+    turns: List[Turn] = []
+    for line in path.read_text().splitlines():
+        try:
+            entry = json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if not isinstance(entry, dict) or entry.get("type") != "response_item":
+            continue
+        payload = entry.get("payload") or {}
+        if not isinstance(payload, dict) or payload.get("type") != "message":
+            continue
+        role = payload.get("role")
+        if role == "user":
+            text = _text_from_codex_content(payload.get("content"), {"input_text"})
+            if text.startswith("<"):
+                continue  # environment/developer context, not user speech
+        elif role == "assistant":
+            text = _text_from_codex_content(payload.get("content"), {"output_text"})
+        else:
+            continue
+        if text:
+            turns.append(Turn(role, text))
+    return turns
+
+
 def transcript_text(turns: List[Turn], max_chars: int) -> str:
     """Render turns as "ROLE: text" lines joined by newlines, tail-truncated to
     max_chars (keeping the most recent conversation, snapped to a line boundary)
@@ -84,6 +132,7 @@ def transcript_text(turns: List[Turn], max_chars: int) -> str:
 # are skipped with a warning instead of crashing.
 PARSERS = {
     "claude-jsonl": parse_transcript,
+    "codex-jsonl": parse_codex_transcript,
     # "kiro-sessions": parse_kiro_sessions,  # pending real Kiro session data
 }
 

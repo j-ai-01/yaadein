@@ -82,6 +82,12 @@ _DEFAULT_WATCH_SOURCES = [
         "format": "claude-jsonl",
     },
     {
+        "root": str(Path.home() / ".codex" / "sessions"),
+        "glob": "*/*/*/*.jsonl",
+        "harness": "codex",
+        "format": "codex-jsonl",
+    },
+    {
         "root": str(
             Path.home() / "Library" / "Application Support" / "Kiro"
             / "User" / "globalStorage" / "kiro.kiroagent" / "sessions"

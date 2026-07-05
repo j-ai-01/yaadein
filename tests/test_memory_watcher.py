@@ -42,6 +42,17 @@ def test_sniffs_cwd_from_transcript_entries(tmp_path):
     assert sniff_project_path(path) == "/Users/jai/workplace/repo"
 
 
+def test_sniffs_cwd_from_codex_session_meta_payload(tmp_path):
+    path = tmp_path / "codex.jsonl"
+    path.write_text(
+        json.dumps({
+            "type": "session_meta",
+            "payload": {"cwd": "/Users/jai/workplace/yaadein"},
+        })
+    )
+    assert sniff_project_path(path) == "/Users/jai/workplace/yaadein"
+
+
 def test_sniff_returns_none_when_no_cwd(tmp_path):
     path = tmp_path / "s.jsonl"
     path.write_text(json.dumps({"type": "user", "message": {}}))

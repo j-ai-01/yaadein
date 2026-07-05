@@ -1,5 +1,10 @@
 import json
-from yaadein.transcript import Turn, parse_transcript, transcript_text
+from yaadein.transcript import (
+    Turn,
+    parse_codex_transcript,
+    parse_transcript,
+    transcript_text,
+)
 
 
 def write_jsonl(path, entries):
@@ -78,9 +83,53 @@ def test_skips_entry_with_non_dict_message(tmp_path):
 
 
 def test_parser_registry_knows_claude_jsonl():
-    from yaadein.transcript import get_parser, parse_transcript
+    from yaadein.transcript import get_parser, parse_codex_transcript, parse_transcript
     assert get_parser("claude-jsonl") is parse_transcript
+    assert get_parser("codex-jsonl") is parse_codex_transcript
     assert get_parser("kiro-sessions") is None
+
+
+def test_parses_codex_response_items_once(tmp_path):
+    p = tmp_path / "codex.jsonl"
+    write_jsonl(p, [
+        {"type": "session_meta", "payload": {"cwd": "/repo"}},
+        {"type": "response_item", "payload": {
+            "type": "message", "role": "developer",
+            "content": [{"type": "input_text", "text": "internal instructions"}],
+        }},
+        {"type": "response_item", "payload": {
+            "type": "message", "role": "user",
+            "content": [{"type": "input_text", "text": "<environment_context>skip</environment_context>"}],
+        }},
+        {"type": "response_item", "payload": {
+            "type": "message", "role": "user",
+            "content": [{"type": "input_text", "text": "Can Yaadein read Codex sessions?"}],
+        }},
+        {"type": "event_msg", "payload": {
+            "type": "user_message",
+            "message": "Can Yaadein read Codex sessions?",
+        }},
+        {"type": "response_item", "payload": {
+            "type": "function_call", "name": "memory_briefing",
+            "arguments": "{}",
+        }},
+        {"type": "response_item", "payload": {
+            "type": "message", "role": "assistant",
+            "content": [{"type": "output_text", "text": "Yes, with a Codex parser."}],
+        }},
+        {"type": "event_msg", "payload": {
+            "type": "agent_message",
+            "message": "Yes, with a Codex parser.",
+        }},
+        {"type": "response_item", "payload": {
+            "type": "reasoning",
+            "encrypted_content": "secret-ish internal blob",
+        }},
+    ])
+    assert parse_codex_transcript(p) == [
+        Turn("user", "Can Yaadein read Codex sessions?"),
+        Turn("assistant", "Yes, with a Codex parser."),
+    ]
 
 
 def test_extractor_rejects_unknown_format_gracefully(tmp_path):

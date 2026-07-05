@@ -42,6 +42,11 @@ def sniff_project_path(transcript: Path, max_lines: int = 100) -> Optional[str]:
                     cwd = entry.get("cwd")
                     if isinstance(cwd, str) and cwd:
                         return cwd
+                    payload = entry.get("payload")
+                    if isinstance(payload, dict):
+                        cwd = payload.get("cwd")
+                        if isinstance(cwd, str) and cwd:
+                            return cwd
     except OSError:
         return None
     return None

@@ -294,7 +294,7 @@ overridden per-run with a `YAADEIN_*` environment variable — no file edits:
 | `YAADEIN_LLM_MODEL` / `YAADEIN_EMBED_MODEL` | `gemma4` / `nomic-embed-text` | extraction LLM / embedder |
 | `YAADEIN_DATA_DIR` | `./memory_store` | where the brain lives |
 | `YAADEIN_WATCH_INTERVAL` | `30` | watcher sweep seconds (0 = off) |
-| `YAADEIN_WATCH_SOURCES` | Claude Code + Kiro | JSON list of watch sources (below) |
+| `YAADEIN_WATCH_SOURCES` | Claude Code + Codex + Kiro | JSON list of watch sources (below) |
 | `YAADEIN_TOP_K`, `YAADEIN_MAX_PER_SESSION`, `YAADEIN_CONFIDENCE_FLOOR`, `YAADEIN_REINFORCE_THRESHOLD`, `YAADEIN_TRANSCRIPT_MAX_CHARS` | see config.py | recall & gate tuning |
 | `YAADEIN_EPISODE_EXCERPT_MAX_CHARS` | `6000` | verbatim excerpt cap per episode |
 | `YAADEIN_EPISODE_RECENCY_WEIGHT` / `YAADEIN_EPISODE_RECENCY_HALFLIFE_DAYS` | `0.15` / `7.0` | recency bonus in conversation search |
@@ -304,14 +304,17 @@ transcript directory, a glob, a harness label, and a transcript `format`:
 
 ```json
 [{"root": "~/.claude/projects", "glob": "*/*.jsonl",
-  "harness": "claude-code", "format": "claude-jsonl"}]
+  "harness": "claude-code", "format": "claude-jsonl"},
+ {"root": "~/.codex/sessions", "glob": "*/*/*/*.jsonl",
+  "harness": "codex", "format": "codex-jsonl"}]
 ```
 
 Formats map to parsers in `yaadein/transcript.py` (`PARSERS`). A source
 whose format has no parser yet is skipped with a warning at startup — the
-Kiro source ships pre-configured and lights up automatically the day a
-`kiro-sessions` parser is registered. **Adding a new harness = one parser
-function + one registry line + one source entry.**
+Codex source reads Codex Desktop JSONL sessions, while the Kiro source ships
+pre-configured and lights up automatically the day a `kiro-sessions` parser
+is registered. **Adding a new harness = one parser function + one registry
+line + one source entry.**
 
 ## Architecture in one paragraph
 
@@ -393,7 +396,7 @@ POST /memory/extract ──background──► extractor.extract(path)
 **Flow 4 — the watcher loop** (`server.start_transcript_watcher`):
 
 ```
-every WATCH_INTERVAL seconds, per configured source (claude-code, kiro…):
+every WATCH_INTERVAL seconds, per configured source (claude-code, codex, kiro…):
   format has a parser? ── no → skipped with a warning at startup
   watcher.find_recent_transcripts(root, glob)   modified in last 2×interval
   watcher.sniff_project_path(transcript)        cwd from the file's own entries

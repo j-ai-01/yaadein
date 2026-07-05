@@ -85,6 +85,73 @@ def test_end_to_end_writes_proposed_memory_with_provenance(tmp_path):
     assert row.source_harness == "claude-code"
 
 
+def test_codex_jsonl_extraction_writes_proposed_memory(tmp_path):
+    transcript = tmp_path / "codex.jsonl"
+    transcript.write_text("\n".join([
+        json.dumps({
+            "type": "session_meta",
+            "payload": {"cwd": "/Users/jai/workplace/yaadein"},
+        }),
+        json.dumps({
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "developer",
+                "content": [{"type": "input_text", "text": "internal instructions"}],
+            },
+        }),
+        json.dumps({
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "I prefer pytest over unittest, always."}],
+            },
+        }),
+        json.dumps({
+            "type": "event_msg",
+            "payload": {
+                "type": "user_message",
+                "message": "I prefer pytest over unittest, always.",
+            },
+        }),
+        json.dumps({
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "Noted."}],
+            },
+        }),
+        json.dumps({
+            "type": "response_item",
+            "payload": {
+                "type": "function_call",
+                "name": "exec_command",
+                "arguments": "{}",
+            },
+        }),
+    ]))
+    gen = CannedGenerator(canned_json("I prefer pytest over unittest"))
+    extractor, store, _ = make_extractor(tmp_path, gen)
+
+    result = extractor.extract(
+        transcript,
+        source_harness="codex",
+        session_id="codex-session-1",
+        transcript_format="codex-jsonl",
+    )
+
+    assert result.error is None
+    assert len(result.written) == 1
+    row = store.get(result.written[0])
+    assert row.status == "proposed"
+    assert row.source_harness == "codex"
+    assert row.source_session == "codex-session-1"
+    assert "internal instructions" not in gen.prompts[0]
+    assert "function_call" not in gen.prompts[0]
+
+
 def test_redaction_happens_before_llm_sees_transcript(tmp_path):
     transcript = write_transcript(tmp_path, "my key is AKIAIOSFODNN7EXAMPLE ok")
     gen = CannedGenerator("[]")
