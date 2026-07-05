@@ -27,10 +27,17 @@ leaves your machine.
 
 Two doors into the memory:
 
-1. **Agents read & write directly** via four MCP tools (see [Tools](#the-four-tools)).
+1. **Agents read & write directly** via six MCP tools (see [Tools](#the-four-tools)).
 2. **Auto-extraction:** when a session ends, its transcript runs through a
    five-stage pipeline — parse → **redact secrets** → distill with a local
    LLM → quality-gate → write as `proposed` with full provenance.
+
+Since v2, every extraction pass also records an **episode** — a write-once
+conversation record: a name-preserving summary (searchable by meaning), a
+redacted verbatim excerpt (episodes never go blind, even if the transcript
+is deleted), a transcript pointer, and links to the facts born in that pass.
+**Facts for speed, episodes for story, transcript pointers for ground
+truth** — and the briefing includes "recently discussed."
 
 ---
 
@@ -176,8 +183,10 @@ closes instantly and nothing breaks — that transcript is simply skipped
 |---|---|---|
 | `remember` | you ("remember this") or the agent when you state a clear preference/decision | Save a durable fact — lands `confirmed` |
 | `recall_memory` | the agent, whenever your question touches preferences or project knowledge | Semantic search, ranked; `project_path` adds project scope |
-| `memory_briefing` | agent at session start | Digest: top facts, recent decisions, gotchas, conflicts |
+| `memory_briefing` | agent at session start | Digest: top facts, recent decisions, gotchas, conflicts, recently discussed |
 | `forget_memory` | you, essentially always | Permanent delete (audit-logged) |
+| `recall_conversations` | the agent, when you refer to a past discussion | Search episode summaries by meaning, recency-weighted |
+| `read_conversation` | the agent, after recall_conversations | One episode's summary + verbatim (redacted) excerpt + linked facts |
 
 **Scopes:** memories are user-wide (`"*"`) or bound to a project — keyed by
 git remote URL (fallback: repo root path), so the same repo is recognized
@@ -287,6 +296,8 @@ overridden per-run with a `YAADEIN_*` environment variable — no file edits:
 | `YAADEIN_WATCH_INTERVAL` | `30` | watcher sweep seconds (0 = off) |
 | `YAADEIN_WATCH_SOURCES` | Claude Code + Kiro | JSON list of watch sources (below) |
 | `YAADEIN_TOP_K`, `YAADEIN_MAX_PER_SESSION`, `YAADEIN_CONFIDENCE_FLOOR`, `YAADEIN_REINFORCE_THRESHOLD`, `YAADEIN_TRANSCRIPT_MAX_CHARS` | see config.py | recall & gate tuning |
+| `YAADEIN_EPISODE_EXCERPT_MAX_CHARS` | `6000` | verbatim excerpt cap per episode |
+| `YAADEIN_EPISODE_RECENCY_WEIGHT` / `YAADEIN_EPISODE_RECENCY_HALFLIFE_DAYS` | `0.15` / `7.0` | recency bonus in conversation search |
 
 **Watch sources** make harness support pluggable. Each source names a
 transcript directory, a glob, a harness label, and a transcript `format`:
@@ -370,8 +381,12 @@ POST /memory/extract ──background──► extractor.extract(path)
   4. gates.apply_gates              no verbatim evidence → rejected; max 5
   5. per survivor: service.find_similar ≥ 0.85?
        yes → service.reinforce      (same fact re-learned = confidence +0.1)
-       no  → service.propose        status=proposed, full provenance
-  6. mark processed (hash + bookmark advanced)
+       no  → service.propose        status=proposed, stamped with episode_id
+  6. service.record_episode         summary (LLM call #2) + redacted excerpt
+                                    + transcript pointer, preset episode id
+  7. mark processed (hash + bookmark advanced)
+     ordering is atomic-retryable (R9.1): any failure before step 7 leaves
+     the transcript unprocessed — a retry re-runs the window; dedup bounds it
 ```
 
 **Flow 4 — the watcher loop** (`server.start_transcript_watcher`):
