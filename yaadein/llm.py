@@ -9,6 +9,7 @@ class TextGenerator(Protocol):
     """Anything that can complete a prompt and return generated text."""
 
     def generate(self, prompt: str) -> str:
+        """Complete `prompt` and return the generated text (tests inject fakes here)."""
         ...
 
 

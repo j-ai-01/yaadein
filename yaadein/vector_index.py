@@ -15,6 +15,7 @@ class Embedder(Protocol):
     """Anything that can turn text into a fixed-size embedding vector."""
 
     def embed(self, text: str) -> List[float]:
+        """Return the embedding vector for `text` (tests inject fakes here)."""
         ...
 
 
@@ -28,6 +29,7 @@ class OllamaEmbedder:
         self._model = OllamaEmbedding(model_name=EMBED_MODEL, base_url=OLLAMA_BASE_URL)
 
     def embed(self, text: str) -> List[float]:
+        """Embed `text` via the local Ollama model (one network call to localhost)."""
         return self._model.get_text_embedding(text)
 
 
