@@ -13,27 +13,47 @@ from pathlib import Path
 def _make_service(tmp_path: Path):
     """Build an in-memory MemoryService with a tracking fake vector index.
 
-    The fake index remembers every id passed to add() and returns them all
-    with similarity=1.0 on any query — so recall() sees facts the extractor
-    wrote without needing a real embedding model.
+    The fake index remembers every (id, text) pair passed to add() and, on
+    query(), scores each stored text against the query by word overlap —
+    an exact/near-exact match scores 1.0, unrelated text scores low. This
+    keeps recall() working without a real embedding model, while still
+    letting genuinely distinct facts (e.g. "User fact number 0" vs
+    "User fact number 1") be told apart, the way a real embedding model
+    would, instead of every stored id colliding at similarity=1.0.
     """
     from yaadein.store import MemoryStore
     from yaadein.service import MemoryService
 
     store = MemoryStore(tmp_path / "memories.db")
 
-    # Tracking index: records ids on add(), returns them all on query()
-    stored_ids: list = []
+    # Tracking index: records (id, text) on add(), scores by word overlap on query()
+    stored: list = []  # list of (memory_id, text)
+
+    def _score(query: str, text: str) -> float:
+        q_words = set(query.lower().split())
+        t_words = set(text.lower().split())
+        if not q_words or not t_words:
+            return 0.0
+        overlap = len(q_words & t_words)
+        return overlap / len(q_words | t_words)
 
     index = MagicMock()
-    index.add.side_effect = lambda memory_id, text: stored_ids.append(memory_id)
-    index.query.side_effect = lambda query, top_k=20: [(mid, 1.0) for mid in stored_ids]
+    index.add.side_effect = lambda memory_id, text: stored.append((memory_id, text))
+
+    def _query(query: str, top_k: int = 20):
+        scored = [(mid, _score(query, text)) for mid, text in stored]
+        scored.sort(key=lambda pair: pair[1], reverse=True)
+        return scored[:top_k]
+
+    index.query.side_effect = _query
 
     episode_index = MagicMock()
     episode_index.query.return_value = []
     episode_index.add = MagicMock()
 
-    return MemoryService(store=store, vector_index=index, episode_index=episode_index)
+    service = MemoryService(store=store, vector_index=index, episode_index=episode_index)
+    service.store = store  # test-only convenience accessor for direct store assertions
+    return service
 
 
 def _make_extractor(service, llm_response: str, extract_log: Path):
@@ -163,5 +183,20 @@ def test_s1_concurrent_extractions_no_data_loss(tmp_path):
         t.join()
 
     assert errors == [], f"Extraction errors: {errors}"
-    all_memories = service.recall("User fact", project_key=None)
-    assert len(all_memories) >= 15  # allow some near-duplicate merging
+
+    # recall() caps results at MEMORY_TOP_K, so it can't confirm all 20 writes
+    # landed. Go straight to the store instead: list() returns every row,
+    # unbounded. Each fact's content is distinct ("User fact number 0..19"),
+    # so none of them should be similar enough to trigger the extractor's
+    # dedup/reinforce path — 20 concurrent extractions should mean 20 rows.
+    all_memories = service.store.list()
+    fact_memories = [m for m in all_memories if "User fact number" in m.content]
+    distinct_contents = {m.content for m in fact_memories}
+    assert len(distinct_contents) == 20, (
+        f"Expected 20 distinct facts written, got {len(distinct_contents)}: "
+        f"{sorted(distinct_contents)}"
+    )
+    assert len(fact_memories) == 20, (
+        f"Expected 20 memory rows (no data loss, no unexpected merging), "
+        f"got {len(fact_memories)}"
+    )
