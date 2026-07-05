@@ -1,5 +1,5 @@
 """Yaadein daemon entrypoint: a FastAPI app that hosts the MCP server (SSE
-transport) exposing the four memory tools, plus an HTTP `/memory/extract`
+transport) exposing the six memory tools, plus an HTTP `/memory/extract`
 endpoint and a background transcript watcher that drive automatic extraction.
 """
 
@@ -165,7 +165,7 @@ sse = SseServerTransport("/messages")
 
 @server.list_tools()
 async def handle_list_tools() -> list[types.Tool]:
-    """MCP tool discovery: advertise the four memory tools to connecting agents."""
+    """MCP tool discovery: advertise the six memory tools to connecting agents."""
     return memory_tool_definitions()
 
 

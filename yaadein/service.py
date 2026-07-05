@@ -178,14 +178,18 @@ class MemoryService:
                 age_days = max(
                     0.0, (now - datetime.fromisoformat(episode.created_at)).total_seconds() / 86400
                 )
-            except ValueError:
+            except (ValueError, TypeError):
                 age_days = 0.0
             bonus = MEMORY_EPISODE_RECENCY_WEIGHT * 0.5 ** (
                 age_days / MEMORY_EPISODE_RECENCY_HALFLIFE_DAYS
             )
             scored.append((episode, similarity + bonus))
         scored.sort(key=lambda pair: pair[1], reverse=True)
-        return [{**e.to_dict(), "score": round(s, 4)} for e, s in scored[:top_k]]
+        return [{
+            "id": e.id, "summary": e.summary, "created_at": e.created_at,
+            "session_id": e.session_id, "scope_type": e.scope_type,
+            "scope_key": e.scope_key, "score": round(s, 4),
+        } for e, s in scored[:top_k]]
 
     def read_episode(self, episode_id: str) -> Optional[dict]:
         """Fetch one episode's full detail plus the ids of facts extracted

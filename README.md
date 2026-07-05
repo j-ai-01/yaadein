@@ -27,7 +27,7 @@ leaves your machine.
 
 Two doors into the memory:
 
-1. **Agents read & write directly** via six MCP tools (see [Tools](#the-four-tools)).
+1. **Agents read & write directly** via six MCP tools (see [Tools](#the-six-tools)).
 2. **Auto-extraction:** when a session ends, its transcript runs through a
    five-stage pipeline — parse → **redact secrets** → distill with a local
    LLM → quality-gate → write as `proposed` with full provenance.
@@ -122,7 +122,7 @@ Kiro builds that only speak stdio servers; needs node/npx):
 }
 ```
 
-Kiro then shares the same brain (all four tools). Auto-*mining* of Kiro
+Kiro then shares the same brain (all six tools). Auto-*mining* of Kiro
 sessions additionally needs a `kiro-sessions` transcript parser — see
 [Configuration](#configuration).
 
@@ -177,7 +177,7 @@ closes instantly and nothing breaks — that transcript is simply skipped
 
 ## Using it day to day
 
-### The four tools
+### The six tools
 
 | Tool | Who typically triggers it | What it does |
 |---|---|---|
@@ -340,7 +340,7 @@ Every module now carries purpose docstrings — this table is the index:
 | `yaadein/vector_index.py` | **Meaning layer**: Chroma embeddings, `Embedder` protocol | utils/chroma_client |
 | `yaadein/scopes.py` | Project identity: git remote → repo root → path | — |
 | `yaadein/service.py` | The brain's API: remember/propose/recall/briefing/forget/find_similar/reinforce | store, vector_index, scopes |
-| `yaadein/mcp_tools.py` | The four MCP tool definitions + dispatch (descriptions steer agent behavior) | service, scopes |
+| `yaadein/mcp_tools.py` | The six MCP tool definitions + dispatch (descriptions steer agent behavior) | service, scopes |
 | `yaadein/transcript.py` | Claude Code JSONL parser + `PARSERS` registry + tail truncation | — |
 | `yaadein/redact.py` | Secret scrubbing (patterns + entropy) — runs before any LLM sees text | — |
 | `yaadein/gates.py` | Hallucination defense: grounding, budget, confidence floor, batch dedupe | types, config |
@@ -378,14 +378,15 @@ POST /memory/extract ──background──► extractor.extract(path)
   1. transcript.parse_transcript    jsonl → clean Turns (new ones only)
   2. redact.redact                  secrets never reach the LLM
   3. llm.generate(distill prompt)   gemma proposes candidate facts
-  4. gates.apply_gates              no verbatim evidence → rejected; max 5
-  5. per survivor: service.find_similar ≥ 0.85?
+  4. llm.generate(summary prompt)   summary (LLM call #2), skipped if no episode index
+  5. gates.apply_gates              no verbatim evidence → rejected; max 5
+  6. per survivor: service.find_similar ≥ 0.85?
        yes → service.reinforce      (same fact re-learned = confidence +0.1)
        no  → service.propose        status=proposed, stamped with episode_id
-  6. service.record_episode         summary (LLM call #2) + redacted excerpt
-                                    + transcript pointer, preset episode id
-  7. mark processed (hash + bookmark advanced)
-     ordering is atomic-retryable (R9.1): any failure before step 7 leaves
+  7. service.record_episode         redacted excerpt + transcript pointer,
+                                    preset episode id, using the step-4 summary
+  8. mark processed (hash + bookmark advanced)
+     ordering is atomic-retryable (R9.1): any failure before step 8 leaves
      the transcript unprocessed — a retry re-runs the window; dedup bounds it
 ```
 

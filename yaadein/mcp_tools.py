@@ -1,5 +1,5 @@
 """MCP tool surface for agents: definitions (name, description, JSON schema)
-for the four memory tools plus the synchronous dispatch that turns a tool
+for the six memory tools plus the synchronous dispatch that turns a tool
 call into a MemoryService call. Tool descriptions here are prompts the
 connecting agent reads to decide when to call each tool, so their wording is
 as load-bearing as the code.

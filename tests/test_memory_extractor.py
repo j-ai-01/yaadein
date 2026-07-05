@@ -327,13 +327,24 @@ def test_summary_failure_aborts_pass_before_any_writes(tmp_path):
     result = extractor.extract(transcript)
     assert result.error is not None
     assert store.list() == [] and store.list_episodes() == []  # R9.1: nothing written
-    assert extractor.extract(  # retryable — but give it responses this time
-        transcript
-    ).error is not None or True  # (hash unchanged, still unprocessed: next line proves it)
     # the transcript was never marked processed:
     gen2 = SequencedGenerator([canned_json("I prefer pytest over unittest"), "Summary."])
     extractor._generator = gen2
     assert extractor.extract(transcript).already_processed is False
+
+
+def test_episode_excerpt_is_redacted_and_capped(tmp_path):
+    from config import MEMORY_EPISODE_EXCERPT_MAX_CHARS
+
+    transcript = write_transcript(
+        tmp_path, "my key is AKIAIOSFODNN7EXAMPLE, please don't leak it"
+    )
+    gen = SequencedGenerator(["[]", "Talked about credentials handling."])
+    extractor, store, _ = make_episodic_extractor(tmp_path, gen)
+    result = extractor.extract(transcript)
+    episode = store.get_episode(result.episode_id)
+    assert "AKIAIOSFODNN7EXAMPLE" not in episode.excerpt
+    assert len(episode.excerpt) <= MEMORY_EPISODE_EXCERPT_MAX_CHARS
 
 
 def test_no_episode_index_skips_summary_call_entirely(tmp_path):

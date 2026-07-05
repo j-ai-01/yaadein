@@ -57,6 +57,21 @@ def test_record_episode_rolls_back_on_index_failure(tmp_path):
     assert store.list_episodes() == []
 
 
+def test_recall_returns_trimmed_payload_without_excerpt(tmp_path):
+    service, _ = make_service(tmp_path)
+    service.record_episode(
+        summary="Designed the Kyun provenance project.",
+        excerpt="USER: kyun idea..." * 100, scope_type="user", scope_key="*",
+        session_id="sess-1",
+    )
+    hits = service.recall_episodes("kyun")
+    assert "excerpt" not in hits[0]
+    assert set(hits[0]) == {
+        "id", "summary", "created_at", "session_id",
+        "scope_type", "scope_key", "score",
+    }
+
+
 def test_recall_scope_filtering(tmp_path):
     service, _ = make_service(tmp_path)
     service.record_episode(summary="Kyun repo-a talk", excerpt="x",
