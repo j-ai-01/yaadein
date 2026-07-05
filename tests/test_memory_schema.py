@@ -20,7 +20,7 @@ def test_migrate_creates_tables_and_sets_version(tmp_path):
     conn = connect(tmp_path / "memories.db")
     migrate(conn)
     assert {"memories", "audit_log", "schema_version"} <= _tables(conn)
-    assert schema_version(conn) == 1
+    assert schema_version(conn) == 2
     conn.close()
 
 
@@ -28,7 +28,7 @@ def test_migrate_is_idempotent(tmp_path):
     conn = connect(tmp_path / "memories.db")
     migrate(conn)
     migrate(conn)
-    assert schema_version(conn) == 1
+    assert schema_version(conn) == 2
     conn.close()
 
 

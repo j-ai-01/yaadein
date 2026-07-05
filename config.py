@@ -46,7 +46,13 @@ MEMORY_CHROMA_DIR = MEMORY_DIR / "chroma_db"
 MEMORY_COLLECTION = "yaadein_memories"
 MEMORY_TOP_K = _env_int("TOP_K", 5)
 MEMORY_KEYWORD_BONUS = 0.1
-MEMORY_BRIEFING_LIMITS = {"facts": 10, "decisions": 5, "gotchas": 5}
+MEMORY_BRIEFING_LIMITS = {"facts": 10, "decisions": 5, "gotchas": 5, "conversations": 3}
+
+# ── Episodic memory (v2) ──────────────────────────────────
+MEMORY_EPISODE_COLLECTION = "yaadein_episodes"
+MEMORY_EPISODE_EXCERPT_MAX_CHARS = _env_int("EPISODE_EXCERPT_MAX_CHARS", 6000)
+MEMORY_EPISODE_RECENCY_WEIGHT = _env_float("EPISODE_RECENCY_WEIGHT", 0.15)
+MEMORY_EPISODE_RECENCY_HALFLIFE_DAYS = _env_float("EPISODE_RECENCY_HALFLIFE_DAYS", 7.0)
 
 # ── Extraction pipeline ───────────────────────────────────
 MEMORY_MAX_PER_SESSION = _env_int("MAX_PER_SESSION", 5)

@@ -17,7 +17,7 @@ _COLUMNS = [
     "id", "content", "category", "scope_type", "scope_key", "status",
     "confidence", "source_harness", "source_session", "evidence",
     "created_at", "last_retrieved", "times_retrieved", "times_used",
-    "superseded_by", "conflict_with",
+    "superseded_by", "conflict_with", "episode_id",
 ]
 
 
