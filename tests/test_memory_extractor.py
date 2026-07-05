@@ -266,3 +266,92 @@ def test_bookmark_tolerates_legacy_bare_hash_log(tmp_path):
     gen = CannedGenerator(canned_json("I prefer pytest over unittest"))
     extractor, _, _ = make_extractor(tmp_path, gen)
     assert extractor.extract(transcript).already_processed is True
+
+
+class SequencedGenerator:
+    """Returns queued responses in order; raises when exhausted."""
+
+    def __init__(self, responses):
+        self._responses = list(responses)
+        self.prompts = []
+
+    def generate(self, prompt):
+        self.prompts.append(prompt)
+        if not self._responses:
+            raise RuntimeError("no more canned responses")
+        return self._responses.pop(0)
+
+
+def make_episodic_extractor(tmp_path, generator):
+    store = MemoryStore(tmp_path / "memories.db")
+    service = MemoryService(
+        store=store,
+        vector_index=MemoryVectorIndex(tmp_path / "cf", FakeEmbedder(), "t_facts"),
+        episode_index=MemoryVectorIndex(tmp_path / "ce", FakeEmbedder(), "t_eps"),
+    )
+    extractor = Extractor(service=service, generator=generator,
+                          extract_log=tmp_path / ".extracted.json")
+    return extractor, store, service
+
+
+def test_pass_creates_episode_with_stamped_facts(tmp_path):
+    transcript = write_transcript(tmp_path, "I prefer pytest over unittest, always.")
+    gen = SequencedGenerator([
+        canned_json("I prefer pytest over unittest"),
+        "We discussed testing preferences. Jai prefers pytest.",
+    ])
+    extractor, store, _ = make_episodic_extractor(tmp_path, gen)
+    result = extractor.extract(transcript, session_id="sess-9")
+    assert result.episode_id and result.episode_id.startswith("ep_")
+    episode = store.get_episode(result.episode_id)
+    assert episode.summary.startswith("We discussed testing")
+    assert "pytest over unittest" in episode.excerpt  # redacted excerpt of window
+    assert store.get(result.written[0]).episode_id == result.episode_id
+    assert store.fact_ids_for_episode(result.episode_id) == result.written
+
+
+def test_zero_fact_pass_still_creates_episode(tmp_path):
+    transcript = write_transcript(tmp_path, "I prefer pytest over unittest, always.")
+    gen = SequencedGenerator(["[]", "Small talk about testing tools."])
+    extractor, store, _ = make_episodic_extractor(tmp_path, gen)
+    result = extractor.extract(transcript)
+    assert result.written == []
+    assert result.episode_id is not None
+    assert store.get_episode(result.episode_id) is not None
+
+
+def test_summary_failure_aborts_pass_before_any_writes(tmp_path):
+    transcript = write_transcript(tmp_path, "I prefer pytest over unittest, always.")
+    gen = SequencedGenerator([canned_json("I prefer pytest over unittest")])  # no 2nd response
+    extractor, store, _ = make_episodic_extractor(tmp_path, gen)
+    result = extractor.extract(transcript)
+    assert result.error is not None
+    assert store.list() == [] and store.list_episodes() == []  # R9.1: nothing written
+    # the transcript was never marked processed:
+    gen2 = SequencedGenerator([canned_json("I prefer pytest over unittest"), "Summary."])
+    extractor._generator = gen2
+    assert extractor.extract(transcript).already_processed is False
+
+
+def test_episode_excerpt_is_redacted_and_capped(tmp_path):
+    from config import MEMORY_EPISODE_EXCERPT_MAX_CHARS
+
+    transcript = write_transcript(
+        tmp_path, "my key is AKIAIOSFODNN7EXAMPLE, please don't leak it"
+    )
+    gen = SequencedGenerator(["[]", "Talked about credentials handling."])
+    extractor, store, _ = make_episodic_extractor(tmp_path, gen)
+    result = extractor.extract(transcript)
+    episode = store.get_episode(result.episode_id)
+    assert "AKIAIOSFODNN7EXAMPLE" not in episode.excerpt
+    assert len(episode.excerpt) <= MEMORY_EPISODE_EXCERPT_MAX_CHARS
+
+
+def test_no_episode_index_skips_summary_call_entirely(tmp_path):
+    transcript = write_transcript(tmp_path, "I prefer pytest over unittest, always.")
+    gen = SequencedGenerator([canned_json("I prefer pytest over unittest")])  # ONE response only
+    extractor, store, _ = make_extractor(tmp_path, gen)  # existing helper: no episode index
+    result = extractor.extract(transcript)
+    assert result.error is None and result.episode_id is None
+    assert len(gen.prompts) == 1  # summary LLM call never happened
+    assert store.get(result.written[0]).episode_id is None

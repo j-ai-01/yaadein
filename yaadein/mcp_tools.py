@@ -1,5 +1,5 @@
 """MCP tool surface for agents: definitions (name, description, JSON schema)
-for the four memory tools plus the synchronous dispatch that turns a tool
+for the six memory tools plus the synchronous dispatch that turns a tool
 call into a MemoryService call. Tool descriptions here are prompts the
 connecting agent reads to decide when to call each tool, so their wording is
 as load-bearing as the code.
@@ -16,11 +16,14 @@ from yaadein.service import MemoryService
 
 logger = logging.getLogger(__name__)
 
-_MEMORY_TOOLS = {"remember", "recall_memory", "forget_memory", "memory_briefing"}
+_MEMORY_TOOLS = {
+    "remember", "recall_memory", "forget_memory", "memory_briefing",
+    "recall_conversations", "read_conversation",
+}
 
 
 def is_memory_tool(name: str) -> bool:
-    """Whether `name` is one of Yaadein's four memory tools."""
+    """Whether `name` is one of Yaadein's memory tools."""
     return name in _MEMORY_TOOLS
 
 
@@ -106,6 +109,44 @@ def memory_tool_definitions() -> list:
                 "required": [],
             },
         ),
+        types.Tool(
+            name="recall_conversations",
+            description=(
+                "Search past conversations by meaning. Use when the user refers "
+                "to a prior discussion ('what did we discuss about…', 'that idea "
+                "from last week'). Returns ranked episode summaries with dates; "
+                "follow up with read_conversation for the full excerpt."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "What to look up."},
+                    "project_path": {
+                        "type": "string",
+                        "description": "Absolute path of the current project (optional).",
+                    },
+                },
+                "required": ["query"],
+            },
+        ),
+        types.Tool(
+            name="read_conversation",
+            description=(
+                "Fetch one past conversation's summary, verbatim excerpt, and "
+                "linked memory ids, by episode id from recall_conversations or "
+                "memory_briefing."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "episode_id": {
+                        "type": "string",
+                        "description": "Episode id (ep_…) to read.",
+                    },
+                },
+                "required": ["episode_id"],
+            },
+        ),
     ]
 
 
@@ -153,6 +194,16 @@ def _dispatch(name: str, arguments: dict, service: MemoryService) -> object:
 
     if name == "forget_memory":
         return {"forgotten": service.forget(arguments["memory_id"])}
+
+    if name == "recall_conversations":
+        return service.recall_episodes(
+            arguments["query"], project_key=_project_key(arguments)
+        )
+
+    if name == "read_conversation":
+        episode_id = arguments["episode_id"]
+        detail = service.read_episode(episode_id)
+        return detail if detail is not None else {"error": f"unknown episode: {episode_id}"}
 
     # memory_briefing
     return service.briefing(project_key=_project_key(arguments))

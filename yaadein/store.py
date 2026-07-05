@@ -11,13 +11,19 @@ from pathlib import Path
 from typing import List, Optional
 
 from yaadein.schema import connect, migrate
-from yaadein.types import Memory
+from yaadein.types import Episode, Memory
 
 _COLUMNS = [
     "id", "content", "category", "scope_type", "scope_key", "status",
     "confidence", "source_harness", "source_session", "evidence",
     "created_at", "last_retrieved", "times_retrieved", "times_used",
-    "superseded_by", "conflict_with",
+    "superseded_by", "conflict_with", "episode_id",
+]
+
+_EPISODE_COLUMNS = [
+    "id", "session_id", "source_harness", "scope_type", "scope_key",
+    "summary", "excerpt", "transcript_path", "transcript_format",
+    "turn_start", "turn_end", "created_at",
 ]
 
 
@@ -29,6 +35,11 @@ def _now() -> str:
 def _row_to_memory(row: sqlite3.Row) -> Memory:
     """Convert a raw sqlite3.Row from the memories table into a Memory dataclass."""
     return Memory(**{col: row[col] for col in _COLUMNS})
+
+
+def _row_to_episode(row: sqlite3.Row) -> Episode:
+    """Convert a raw sqlite3.Row from the episodes table into an Episode dataclass."""
+    return Episode(**{col: row[col] for col in _EPISODE_COLUMNS})
 
 
 class MemoryStore:
@@ -111,6 +122,63 @@ class MemoryStore:
             (memory_id,),
         )
         self._audit("reinforce", memory_id, source_session)
+        self._conn.commit()
+
+    def add_episode(self, episode: Episode) -> Episode:
+        """Persist a write-once episode; honors preset id (extractor pre-stamps facts)."""
+        if not episode.id:
+            episode.id = f"ep_{uuid.uuid4().hex[:12]}"
+        if not episode.created_at:
+            episode.created_at = _now()
+        values = [getattr(episode, col) for col in _EPISODE_COLUMNS]
+        placeholders = ", ".join("?" for _ in _EPISODE_COLUMNS)
+        self._conn.execute(
+            f"INSERT INTO episodes ({', '.join(_EPISODE_COLUMNS)}) VALUES ({placeholders})",
+            values,
+        )
+        self._audit("add_episode", episode.id, episode.session_id)
+        self._conn.commit()
+        return episode
+
+    def get_episode(self, episode_id: str) -> Optional[Episode]:
+        """Fetch one episode by id, or None if it doesn't exist."""
+        row = self._conn.execute(
+            "SELECT * FROM episodes WHERE id = ?", (episode_id,)
+        ).fetchone()
+        return _row_to_episode(row) if row else None
+
+    def list_episodes(
+        self,
+        scope_type: Optional[str] = None,
+        scope_key: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> List[Episode]:
+        """List episodes matching any combination of scope_type and scope_key filters
+        (all optional; omitted filters are not applied). Newest first by created_at."""
+        clauses, params = [], []
+        for col, val in (("scope_type", scope_type), ("scope_key", scope_key)):
+            if val is not None:
+                clauses.append(f"{col} = ?")
+                params.append(val)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        tail = f" LIMIT {int(limit)}" if limit is not None else ""
+        rows = self._conn.execute(
+            f"SELECT * FROM episodes{where} ORDER BY created_at DESC{tail}", params
+        ).fetchall()
+        return [_row_to_episode(r) for r in rows]
+
+    def fact_ids_for_episode(self, episode_id: str) -> List[str]:
+        """Return ids of all memories stamped with this episode, oldest first."""
+        rows = self._conn.execute(
+            "SELECT id FROM memories WHERE episode_id = ? ORDER BY created_at",
+            (episode_id,),
+        ).fetchall()
+        return [r["id"] for r in rows]
+
+    def delete_episode(self, episode_id: str) -> None:
+        """Rollback helper for a failed index write — episodes are otherwise write-once."""
+        self._conn.execute("DELETE FROM episodes WHERE id = ?", (episode_id,))
+        self._audit("rollback_episode", episode_id, None)
         self._conn.commit()
 
     def forget(self, memory_id: str) -> bool:

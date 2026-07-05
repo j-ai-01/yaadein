@@ -27,9 +27,31 @@ class Memory:
     times_used: int = 0
     superseded_by: Optional[str] = None
     conflict_with: Optional[str] = None
+    episode_id: Optional[str] = None
 
     def to_dict(self) -> dict:
         """Serialize to a plain dict for JSON responses."""
+        return asdict(self)
+
+
+@dataclass
+class Episode:
+    """A write-once record of one extraction pass's conversation window."""
+
+    id: str
+    scope_type: str
+    scope_key: str
+    summary: str
+    excerpt: str
+    session_id: Optional[str] = None
+    source_harness: Optional[str] = None
+    transcript_path: Optional[str] = None
+    transcript_format: Optional[str] = None
+    turn_start: Optional[int] = None
+    turn_end: Optional[int] = None
+    created_at: str = ""
+
+    def to_dict(self) -> dict:
         return asdict(self)
 
 

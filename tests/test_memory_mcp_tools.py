@@ -7,7 +7,7 @@ from yaadein.vector_index import MemoryVectorIndex
 
 
 class FakeEmbedder:
-    _axes = ["pytest", "deploy", "auth", "coffee"]
+    _axes = ["pytest", "deploy", "auth", "coffee", "kyun"]
 
     def embed(self, text):
         words = text.lower()
@@ -24,12 +24,18 @@ def make_service(tmp_path):
             embedder=FakeEmbedder(),
             collection_name="test_memories",
         ),
+        episode_index=MemoryVectorIndex(
+            chroma_dir=tmp_path / "chroma_ep",
+            embedder=FakeEmbedder(),
+            collection_name="test_episodes",
+        ),
     )
 
 
-def test_tool_definitions_expose_four_tools():
+def test_tool_definitions_expose_six_tools():
     names = {t.name for t in memory_tool_definitions()}
-    assert names == {"remember", "recall_memory", "forget_memory", "memory_briefing"}
+    assert names == {"remember", "recall_memory", "forget_memory",
+                     "memory_briefing", "recall_conversations", "read_conversation"}
 
 
 def test_non_memory_tool_returns_none(tmp_path):
@@ -69,7 +75,9 @@ def test_memory_briefing_returns_sections(tmp_path):
         service,
     )
     briefing = json.loads(handle_memory_tool("memory_briefing", {}, service))
-    assert set(briefing) == {"facts", "decisions", "gotchas", "conflicts"}
+    assert set(briefing) == {
+        "facts", "decisions", "gotchas", "conflicts", "recent_conversations",
+    }
     assert briefing["facts"][0]["content"] == "User prefers pytest"
 
 
@@ -85,3 +93,30 @@ def test_is_memory_tool_true_for_memory_tools():
 
 def test_is_memory_tool_false_for_query_rag():
     assert is_memory_tool("query_rag") is False
+
+
+def test_conversation_roundtrip_via_tools(tmp_path):
+    service = make_service(tmp_path)
+    ep = service.record_episode(
+        summary="Designed Kyun provenance.", excerpt="USER: kyun idea...",
+        scope_type="user", scope_key="*",
+    )
+    hits = json.loads(handle_memory_tool(
+        "recall_conversations", {"query": "what did we say about kyun?"}, service))
+    assert hits[0]["id"] == ep.id
+    detail = json.loads(handle_memory_tool(
+        "read_conversation", {"episode_id": ep.id}, service))
+    assert detail["excerpt"].startswith("USER: kyun")
+    assert detail["fact_ids"] == []
+
+
+def test_read_conversation_unknown_id_returns_error(tmp_path):
+    result = json.loads(handle_memory_tool(
+        "read_conversation", {"episode_id": "ep_nope"}, make_service(tmp_path)))
+    assert "unknown episode" in result["error"]
+
+
+def test_recall_conversations_missing_query_returns_error(tmp_path):
+    result = json.loads(handle_memory_tool(
+        "recall_conversations", {}, make_service(tmp_path)))
+    assert "error" in result

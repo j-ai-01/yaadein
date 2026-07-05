@@ -45,6 +45,29 @@ MIGRATIONS = [
     CREATE INDEX idx_memories_scope ON memories (scope_type, scope_key);
     CREATE INDEX idx_memories_status ON memories (status);
     """,
+    # v2: episodic memory — episodes table + fact->episode link (design D1)
+    """
+    CREATE TABLE episodes (
+        id TEXT PRIMARY KEY,
+        session_id TEXT,
+        source_harness TEXT,
+        scope_type TEXT NOT NULL
+            CHECK (scope_type IN ('user', 'project', 'shared')),
+        scope_key TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        excerpt TEXT NOT NULL,
+        transcript_path TEXT,
+        transcript_format TEXT,
+        turn_start INTEGER,
+        turn_end INTEGER,
+        created_at TEXT NOT NULL
+    );
+    CREATE INDEX idx_episodes_scope ON episodes (scope_type, scope_key);
+    CREATE INDEX idx_episodes_created ON episodes (created_at);
+
+    ALTER TABLE memories ADD COLUMN episode_id TEXT;
+    CREATE INDEX idx_memories_episode ON memories (episode_id);
+    """,
 ]
 
 
