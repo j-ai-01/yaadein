@@ -315,6 +315,75 @@ at all. Writes hit SQLite first, then Chroma, and roll back the row if
 indexing fails — a memory is never stored-but-unfindable. Every mutation is
 audit-logged.
 
+## Code map & how a memory flows
+
+Every module now carries purpose docstrings — this table is the index:
+
+| File | What it is | Depends on |
+|---|---|---|
+| `server.py` | Daemon entrypoint: FastAPI + MCP-over-SSE, `/memory/extract`, watcher startup | everything below |
+| `config.py` | All knobs, env-overridable (`YAADEIN_*`) | — |
+| `yaadein/schema.py` | SQLite tables + versioned migrations | — |
+| `yaadein/types.py` | `Memory` and `Candidate` dataclasses | — |
+| `yaadein/store.py` | **Truth layer**: CRUD on memories, every mutation audit-logged | schema, types |
+| `yaadein/vector_index.py` | **Meaning layer**: Chroma embeddings, `Embedder` protocol | utils/chroma_client |
+| `yaadein/scopes.py` | Project identity: git remote → repo root → path | — |
+| `yaadein/service.py` | The brain's API: remember/propose/recall/briefing/forget/find_similar/reinforce | store, vector_index, scopes |
+| `yaadein/mcp_tools.py` | The four MCP tool definitions + dispatch (descriptions steer agent behavior) | service, scopes |
+| `yaadein/transcript.py` | Claude Code JSONL parser + `PARSERS` registry + tail truncation | — |
+| `yaadein/redact.py` | Secret scrubbing (patterns + entropy) — runs before any LLM sees text | — |
+| `yaadein/gates.py` | Hallucination defense: grounding, budget, confidence floor, batch dedupe | types, config |
+| `yaadein/llm.py` | `TextGenerator` protocol + `OllamaGenerator` | config |
+| `yaadein/extractor.py` | Pipeline orchestrator: hash idempotency + turn bookmark + reinforce-vs-propose | all of the above |
+| `yaadein/watcher.py` | Finds recently-active transcripts, sniffs their project cwd | — |
+| `utils/*` | Small helpers: chroma client, file hash, processed-log, ollama check | — |
+
+**Flow 1 — explicit save** (agent calls `remember`):
+
+```
+MCP client ──SSE──► server.handle_call_tool
+  └► mcp_tools.handle_memory_tool("remember")
+       └► service.remember(content, ...)          status=confirmed
+            ├► store.add(row)  ── SQLite INSERT + audit "add"
+            └► vector_index.add(id, content)  ── embed via Ollama → Chroma
+                 (on failure: store.forget(id) rolls the row back)
+```
+
+**Flow 2 — recall** (agent asks "what do we know about X?"):
+
+```
+service.recall(query, project_key)
+  1. vector_index.query(query)      Chroma nominates ids by meaning
+  2. store.get(id) per hit          SQLite decides: scope? archived? superseded?
+  3. + keyword bonus, sort, top-5
+  4. store.record_retrieval(ids)    counters tick → future promote/decay fuel
+```
+
+**Flow 3 — auto-extraction** (hook, watcher, or manual POST):
+
+```
+POST /memory/extract ──background──► extractor.extract(path)
+  0. hash check: unchanged file? → skip.  bookmark: slice turns[seen:]
+  1. transcript.parse_transcript    jsonl → clean Turns (new ones only)
+  2. redact.redact                  secrets never reach the LLM
+  3. llm.generate(distill prompt)   gemma proposes candidate facts
+  4. gates.apply_gates              no verbatim evidence → rejected; max 5
+  5. per survivor: service.find_similar ≥ 0.85?
+       yes → service.reinforce      (same fact re-learned = confidence +0.1)
+       no  → service.propose        status=proposed, full provenance
+  6. mark processed (hash + bookmark advanced)
+```
+
+**Flow 4 — the watcher loop** (`server.start_transcript_watcher`):
+
+```
+every WATCH_INTERVAL seconds, per configured source (claude-code, kiro…):
+  format has a parser? ── no → skipped with a warning at startup
+  watcher.find_recent_transcripts(root, glob)   modified in last 2×interval
+  watcher.sniff_project_path(transcript)        cwd from the file's own entries
+  └► Flow 3 for each — cheap when nothing changed (hash short-circuits)
+```
+
 ## Development
 
 ```bash
