@@ -422,3 +422,116 @@ def test_no_episode_index_skips_summary_call_entirely(tmp_path):
     assert result.error is None and result.episode_id is None
     assert len(gen.prompts) == 1  # summary LLM call never happened
     assert store.get(result.written[0]).episode_id is None
+
+
+def test_parse_candidates_returns_none_on_invalid_json_array():
+    """A JSON-array-looking string that fails to decode returns None (retryable), not []."""
+    from yaadein.extractor import _parse_candidates
+    assert _parse_candidates("[not valid json,,,]") is None
+
+
+def test_parse_candidates_skips_items_with_bad_field_types():
+    """An item with the right keys but a non-numeric confidence is dropped, not raised."""
+    from yaadein.extractor import _parse_candidates
+    raw = json.dumps([{
+        "content": "User prefers pytest", "category": "preference",
+        "scope": "user", "confidence": "not-a-number", "evidence_quote": "pytest",
+    }])
+    assert _parse_candidates(raw) == []
+
+
+def test_bookmark_reset_when_transcript_shrinks(tmp_path):
+    """If the log's bookmark exceeds the current turn count (rewritten/truncated
+    transcript), extraction resets to mining from the start instead of slicing negatively."""
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text("\n".join([
+        json.dumps({"type": "user", "message": {"role": "user", "content": "one"}}),
+        json.dumps({"type": "user", "message": {"role": "user", "content": "two"}}),
+        json.dumps({"type": "user", "message": {"role": "user", "content": "three"}}),
+    ]))
+    gen = CannedGenerator("[]")
+    extractor, store, _ = make_extractor(tmp_path, gen)
+    extractor.extract(transcript)  # bookmark becomes 3
+
+    # transcript rewritten/truncated to a single turn
+    transcript.write_text(json.dumps(
+        {"type": "user", "message": {"role": "user", "content": "I prefer pytest over unittest, always."}}
+    ))
+    gen2 = CannedGenerator(canned_json("I prefer pytest over unittest"))
+    extractor._generator = gen2
+    result = extractor.extract(transcript)
+    assert result.error is None
+    assert "pytest over unittest" in gen2.prompts[0]  # re-mined from the start
+
+
+def test_empty_episode_summary_is_returned_as_error(tmp_path):
+    """An episode summary that is blank/whitespace-only aborts the pass with an error."""
+    transcript = write_transcript(tmp_path, "I prefer pytest over unittest, always.")
+    gen = SequencedGenerator([canned_json("I prefer pytest over unittest"), "   "])
+    extractor, store, _ = make_episodic_extractor(tmp_path, gen)
+    result = extractor.extract(transcript)
+    assert result.error == "empty episode summary"
+    assert store.list() == [] and store.list_episodes() == []
+
+
+def test_project_scope_candidate_uses_resolved_project_key(tmp_path):
+    """A candidate scoped 'project' is proposed under the resolved project_key,
+    not the user scope, when project_path is supplied."""
+    transcript = write_transcript(tmp_path, "We always deploy through the blue pipeline.")
+    candidate_json = json.dumps([{
+        "content": "Deploys go through the blue pipeline",
+        "category": "fact", "scope": "project",
+        "confidence": 0.9, "evidence_quote": "deploy through the blue pipeline",
+    }])
+    gen = CannedGenerator(candidate_json)
+    extractor, store, _ = make_extractor(tmp_path, gen)
+    result = extractor.extract(transcript, project_path=str(tmp_path))
+    assert len(result.written) == 1
+    saved = store.get(result.written[0])
+    assert saved.scope_type == "project"
+    assert saved.scope_key != "*"
+
+
+def test_episode_write_failure_is_returned_and_retryable(tmp_path):
+    """If record_episode raises (e.g. index failure), the error is surfaced and
+    the transcript is NOT marked processed so a retry can succeed later."""
+    transcript = write_transcript(tmp_path, "I prefer pytest over unittest, always.")
+    gen = SequencedGenerator([
+        canned_json("I prefer pytest over unittest"),
+        "We discussed testing preferences.",
+    ])
+    extractor, store, service = make_episodic_extractor(tmp_path, gen)
+
+    def exploding_record_episode(**kwargs):
+        raise RuntimeError("index write failed")
+
+    service.record_episode = exploding_record_episode
+    result = extractor.extract(transcript)
+    assert result.error is not None
+    assert "episode write failed" in result.error
+
+    gen2 = SequencedGenerator([
+        canned_json("I prefer pytest over unittest"),
+        "We discussed testing preferences.",
+    ])
+    extractor2, _, _ = make_episodic_extractor(tmp_path, gen2)
+    # reuse same extract_log path to check retryability
+    extractor2._extract_log = extractor._extract_log
+    retry = extractor2.extract(transcript)
+    assert retry.already_processed is False
+
+
+def test_build_extractor_wires_singleton_service_and_ollama_generator(monkeypatch):
+    """build_extractor() wires the process-wide MemoryService singleton and a
+    fresh OllamaGenerator, without requiring a real Ollama connection."""
+    import yaadein.extractor as extractor_module
+    import yaadein.service as service_module
+    import yaadein.llm as llm_module
+
+    fake_service = object()
+    monkeypatch.setattr(service_module, "get_memory_service", lambda: fake_service)
+    monkeypatch.setattr(llm_module, "OllamaGenerator", lambda: "fake-generator-instance")
+
+    built = extractor_module.build_extractor()
+    assert built._service is fake_service
+    assert built._generator == "fake-generator-instance"

@@ -1,3 +1,5 @@
+import pytest
+
 from yaadein.store import MemoryStore
 from yaadein.types import Memory
 
@@ -63,6 +65,15 @@ def test_forget_deletes_and_reports(tmp_path):
     assert store.forget(saved.id) is True
     assert store.get(saved.id) is None
     assert store.forget(saved.id) is False
+
+
+def test_close_closes_underlying_connection(tmp_path):
+    """close() closes the sqlite3 connection, so further queries raise ProgrammingError."""
+    import sqlite3
+    store = make_store(tmp_path)
+    store.close()
+    with pytest.raises(sqlite3.ProgrammingError):
+        store.get("anything")
 
 
 def test_every_mutation_is_audited(tmp_path):

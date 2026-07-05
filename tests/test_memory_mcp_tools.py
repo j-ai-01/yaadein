@@ -116,6 +116,17 @@ def test_read_conversation_unknown_id_returns_error(tmp_path):
     assert "unknown episode" in result["error"]
 
 
+def test_unexpected_service_exception_returns_json_error(tmp_path):
+    """A non-KeyError exception raised by the service is caught and returned as a JSON error, not raised."""
+    class ExplodingService:
+        def recall(self, query, project_key=None):
+            raise RuntimeError("index unavailable")
+
+    result = json.loads(handle_memory_tool(
+        "recall_memory", {"query": "pytest"}, ExplodingService()))
+    assert result == {"error": "index unavailable"}
+
+
 def test_recall_conversations_missing_query_returns_error(tmp_path):
     result = json.loads(handle_memory_tool(
         "recall_conversations", {}, make_service(tmp_path)))

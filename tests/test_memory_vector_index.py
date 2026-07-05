@@ -1,4 +1,8 @@
 import math
+import sys
+import types
+from unittest.mock import MagicMock, patch
+
 from yaadein.vector_index import MemoryVectorIndex
 
 
@@ -43,3 +47,23 @@ def test_delete_removes_from_results(tmp_path):
     index.add("m1", "User prefers pytest for all testing")
     index.delete("m1")
     assert index.query("pytest", top_k=1) == []
+
+
+def test_ollama_embedder_wraps_local_model_without_network():
+    """OllamaEmbedder builds an OllamaEmbedding client and delegates embed() to it, with no real network call."""
+    fake_ollama_embedding_cls = MagicMock()
+    fake_instance = fake_ollama_embedding_cls.return_value
+    fake_instance.get_text_embedding.return_value = [0.1, 0.2, 0.3]
+
+    fake_module = types.ModuleType("llama_index.embeddings.ollama")
+    fake_module.OllamaEmbedding = fake_ollama_embedding_cls
+
+    with patch.dict(sys.modules, {"llama_index.embeddings.ollama": fake_module}):
+        from yaadein.vector_index import OllamaEmbedder
+
+        embedder = OllamaEmbedder()
+        result = embedder.embed("hello world")
+
+    fake_ollama_embedding_cls.assert_called_once()
+    fake_instance.get_text_embedding.assert_called_once_with("hello world")
+    assert result == [0.1, 0.2, 0.3]

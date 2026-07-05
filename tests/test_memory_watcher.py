@@ -57,3 +57,26 @@ def test_sniff_returns_none_when_no_cwd(tmp_path):
     path = tmp_path / "s.jsonl"
     path.write_text(json.dumps({"type": "user", "message": {}}))
     assert sniff_project_path(path) is None
+
+
+def test_finds_recent_transcripts_using_default_now(tmp_path):
+    """When now is omitted, find_recent_transcripts falls back to time.time() internally."""
+    now = time.time()
+    fresh = make_transcript(tmp_path, "proj-a", "fresh.jsonl", age_seconds=1, now=now)
+    result = find_recent_transcripts(tmp_path, active_within_seconds=600)
+    assert result == [fresh]
+
+
+def test_sniff_stops_after_max_lines(tmp_path):
+    """sniff_project_path gives up after max_lines without finding a cwd entry."""
+    path = tmp_path / "s.jsonl"
+    lines = [json.dumps({"type": "noise"}) for _ in range(5)]
+    lines.append(json.dumps({"type": "user", "cwd": "/should/not/be/reached"}))
+    path.write_text("\n".join(lines))
+    assert sniff_project_path(path, max_lines=5) is None
+
+
+def test_sniff_returns_none_on_os_error(tmp_path):
+    """sniff_project_path returns None (instead of raising) if the file can't be opened."""
+    missing = tmp_path / "does_not_exist.jsonl"
+    assert sniff_project_path(missing) is None

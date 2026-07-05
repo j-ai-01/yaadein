@@ -132,6 +132,58 @@ def test_parses_codex_response_items_once(tmp_path):
     ]
 
 
+def test_non_dict_block_in_assistant_content_is_skipped(tmp_path):
+    """A non-dict entry inside assistant content blocks is ignored rather than crashing."""
+    p = tmp_path / "s.jsonl"
+    write_jsonl(p, [
+        assistant_blocks(["not-a-dict", {"type": "text", "text": "still works"}]),
+    ])
+    assert parse_transcript(p) == [Turn("assistant", "still works")]
+
+
+def test_message_content_neither_str_nor_list_is_skipped(tmp_path):
+    """An entry whose message content is neither a string nor a list produces no turn."""
+    p = tmp_path / "s.jsonl"
+    write_jsonl(p, [
+        {"type": "user", "message": {"role": "user", "content": 42}},
+        user_str("real question"),
+    ])
+    assert parse_transcript(p) == [Turn("user", "real question")]
+
+
+def test_codex_content_neither_str_nor_list_returns_empty():
+    """_text_from_codex_content returns "" for content that is neither str nor list."""
+    from yaadein.transcript import _text_from_codex_content
+    assert _text_from_codex_content(123, {"input_text"}) == ""
+
+
+def test_codex_content_string_is_stripped():
+    """_text_from_codex_content strips a bare string content payload."""
+    from yaadein.transcript import _text_from_codex_content
+    assert _text_from_codex_content("  hello  ", {"input_text"}) == "hello"
+
+
+def test_codex_content_skips_non_dict_and_wrong_type_blocks():
+    """_text_from_codex_content ignores non-dict blocks and blocks outside text_types."""
+    from yaadein.transcript import _text_from_codex_content
+    blocks = ["not-a-dict", {"type": "other_type", "text": "ignored"},
+              {"type": "input_text", "text": "kept"}]
+    assert _text_from_codex_content(blocks, {"input_text"}) == "kept"
+
+
+def test_codex_parser_skips_malformed_json_lines(tmp_path):
+    """parse_codex_transcript skips lines that fail JSON decoding."""
+    p = tmp_path / "codex.jsonl"
+    p.write_text(
+        "not json at all\n"
+        + json.dumps({"type": "response_item", "payload": {
+            "type": "message", "role": "user",
+            "content": [{"type": "input_text", "text": "hello"}],
+        }})
+    )
+    assert parse_codex_transcript(p) == [Turn("user", "hello")]
+
+
 def test_extractor_rejects_unknown_format_gracefully(tmp_path):
     from yaadein.extractor import Extractor
 
