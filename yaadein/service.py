@@ -8,15 +8,17 @@ hybrid ranking (semantic similarity from Chroma plus a keyword-overlap bonus,
 since embeddings alone under-rank exact-term matches).
 """
 
+from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 
 from config import (
     MEMORY_BRIEFING_LIMITS, MEMORY_CHROMA_DIR, MEMORY_COLLECTION,
-    MEMORY_DB_PATH, MEMORY_KEYWORD_BONUS, MEMORY_TOP_K,
+    MEMORY_DB_PATH, MEMORY_EPISODE_COLLECTION, MEMORY_EPISODE_RECENCY_HALFLIFE_DAYS,
+    MEMORY_EPISODE_RECENCY_WEIGHT, MEMORY_KEYWORD_BONUS, MEMORY_TOP_K,
 )
 from yaadein.scopes import USER_SCOPE_KEY
 from yaadein.store import MemoryStore
-from yaadein.types import Memory
+from yaadein.types import Episode, Memory
 from yaadein.vector_index import MemoryVectorIndex
 
 _KEYWORD_BONUS_CAP = 0.3
@@ -28,9 +30,19 @@ class MemoryService:
     find_similar/reinforce. Every write to the index is paired with a store
     write (or rolled back on index failure) so the two never drift apart."""
 
-    def __init__(self, store: MemoryStore, vector_index: MemoryVectorIndex):
+    def __init__(
+        self,
+        store: MemoryStore,
+        vector_index: MemoryVectorIndex,
+        episode_index: Optional[MemoryVectorIndex] = None,
+    ):
         self._store = store
         self._index = vector_index
+        self._episode_index = episode_index
+
+    @property
+    def has_episode_index(self) -> bool:
+        return self._episode_index is not None
 
     def remember(
         self,
@@ -68,6 +80,7 @@ class MemoryService:
         evidence: Optional[str] = None,
         source_harness: Optional[str] = None,
         source_session: Optional[str] = None,
+        episode_id: Optional[str] = None,
     ) -> Memory:
         """Save a fact from the extraction pipeline as `proposed` (unconfirmed),
         carrying its confidence and evidence quote for later review. Same
@@ -77,6 +90,7 @@ class MemoryService:
             scope_type=scope_type, scope_key=scope_key,
             status="proposed", confidence=confidence, evidence=evidence,
             source_harness=source_harness, source_session=source_session,
+            episode_id=episode_id,
         )
         saved = self._store.add(memory)
         try:
@@ -102,6 +116,86 @@ class MemoryService:
             if memory.scope_type == scope_type and memory.scope_key == scope_key:
                 return memory, similarity
         return None
+
+    def record_episode(
+        self,
+        *,
+        episode_id: str = "",
+        summary: str,
+        excerpt: str,
+        scope_type: str,
+        scope_key: str,
+        session_id: Optional[str] = None,
+        source_harness: Optional[str] = None,
+        transcript_path: Optional[str] = None,
+        transcript_format: Optional[str] = None,
+        turn_start: Optional[int] = None,
+        turn_end: Optional[int] = None,
+    ) -> Episode:
+        """Persist a conversation-window episode and index its summary for
+        semantic recall. Same store-then-index rollback contract as
+        `remember`/`propose` (D5): if indexing fails, the store write is
+        undone via `store.delete_episode` and the error re-raised."""
+        if self._episode_index is None:
+            raise RuntimeError("episode index not configured")
+        episode = Episode(
+            id=episode_id, scope_type=scope_type, scope_key=scope_key,
+            summary=summary, excerpt=excerpt, session_id=session_id,
+            source_harness=source_harness, transcript_path=transcript_path,
+            transcript_format=transcript_format,
+            turn_start=turn_start, turn_end=turn_end,
+        )
+        saved = self._store.add_episode(episode)
+        try:
+            self._episode_index.add(saved.id, saved.summary)
+        except Exception:
+            self._store.delete_episode(saved.id)
+            raise
+        return saved
+
+    def recall_episodes(
+        self,
+        query: str,
+        project_key: Optional[str] = None,
+        top_k: int = 5,
+    ) -> List[dict]:
+        """Semantic search over episode summaries, scope-filtered and
+        re-ranked with a recency bonus (recent episodes decay toward
+        MEMORY_EPISODE_RECENCY_WEIGHT with a MEMORY_EPISODE_RECENCY_HALFLIFE_DAYS
+        half-life) so a fresher conversation can edge out an older, equally
+        similar one. Returns [] when no episode index is configured."""
+        if self._episode_index is None:
+            return []
+        now = datetime.now(timezone.utc)
+        scored = []
+        for episode_id, similarity in self._episode_index.query(query, top_k=20):
+            episode = self._store.get_episode(episode_id)
+            if episode is None:
+                continue
+            if not self._in_scope_pair(episode.scope_type, episode.scope_key, project_key):
+                continue
+            try:
+                age_days = max(
+                    0.0, (now - datetime.fromisoformat(episode.created_at)).total_seconds() / 86400
+                )
+            except ValueError:
+                age_days = 0.0
+            bonus = MEMORY_EPISODE_RECENCY_WEIGHT * 0.5 ** (
+                age_days / MEMORY_EPISODE_RECENCY_HALFLIFE_DAYS
+            )
+            scored.append((episode, similarity + bonus))
+        scored.sort(key=lambda pair: pair[1], reverse=True)
+        return [{**e.to_dict(), "score": round(s, 4)} for e, s in scored[:top_k]]
+
+    def read_episode(self, episode_id: str) -> Optional[dict]:
+        """Fetch one episode's full detail plus the ids of facts extracted
+        from it, or None if the episode id is unknown."""
+        episode = self._store.get_episode(episode_id)
+        if episode is None:
+            return None
+        detail = episode.to_dict()
+        detail["fact_ids"] = self._store.fact_ids_for_episode(episode_id)
+        return detail
 
     def reinforce(self, memory_id: str, source_session: Optional[str] = None) -> None:
         """Bump an existing memory's confidence instead of writing a duplicate;
@@ -186,6 +280,19 @@ class MemoryService:
         )[: MEMORY_BRIEFING_LIMITS["gotchas"]]
         conflicts = [m for m in candidates if m.conflict_with]
 
+        recent = []
+        if self._episode_index is not None:
+            for episode in self._store.list_episodes():
+                if not self._in_scope_pair(episode.scope_type, episode.scope_key, project_key):
+                    continue
+                recent.append({
+                    "id": episode.id,
+                    "summary": episode.summary.split(". ")[0].rstrip("."),
+                    "created_at": episode.created_at,
+                })
+                if len(recent) >= MEMORY_BRIEFING_LIMITS["conversations"]:
+                    break
+
         returned = facts + decisions + gotchas + conflicts
         self._store.record_retrieval(list(dict.fromkeys(m.id for m in returned)))
         return {
@@ -193,17 +300,22 @@ class MemoryService:
             "decisions": [to_dict(m) for m in decisions],
             "gotchas": [to_dict(m) for m in gotchas],
             "conflicts": [to_dict(m) for m in conflicts],
+            "recent_conversations": recent,
         }
 
     @staticmethod
-    def _in_scope(memory: Memory, project_key: Optional[str]) -> bool:
-        """Scope rule: user-scoped memories are always visible; project-scoped
+    def _in_scope_pair(scope_type: str, scope_key: str, project_key: Optional[str]) -> bool:
+        """Scope rule: user-scoped records are always visible; project-scoped
         ones only when project_key matches; shared-scope is not yet reachable."""
-        if memory.scope_type == "user":
+        if scope_type == "user":
             return True
-        if memory.scope_type == "project":
-            return project_key is not None and memory.scope_key == project_key
+        if scope_type == "project":
+            return project_key is not None and scope_key == project_key
         return False  # shared scope arrives with the extractor/live workspaces
+
+    @staticmethod
+    def _in_scope(memory: Memory, project_key: Optional[str]) -> bool:
+        return MemoryService._in_scope_pair(memory.scope_type, memory.scope_key, project_key)
 
 
 _service: Optional[MemoryService] = None
@@ -222,6 +334,11 @@ def get_memory_service() -> MemoryService:
                 chroma_dir=MEMORY_CHROMA_DIR,
                 embedder=OllamaEmbedder(),
                 collection_name=MEMORY_COLLECTION,
+            ),
+            episode_index=MemoryVectorIndex(
+                chroma_dir=MEMORY_CHROMA_DIR,
+                embedder=OllamaEmbedder(),
+                collection_name=MEMORY_EPISODE_COLLECTION,
             ),
         )
     return _service

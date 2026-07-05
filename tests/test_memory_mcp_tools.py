@@ -69,7 +69,9 @@ def test_memory_briefing_returns_sections(tmp_path):
         service,
     )
     briefing = json.loads(handle_memory_tool("memory_briefing", {}, service))
-    assert set(briefing) == {"facts", "decisions", "gotchas", "conflicts"}
+    assert set(briefing) == {
+        "facts", "decisions", "gotchas", "conflicts", "recent_conversations",
+    }
     assert briefing["facts"][0]["content"] == "User prefers pytest"
 
 
