@@ -21,6 +21,8 @@
 #
 # Run with: python3.11 -m pytest -m live tests/live/
 
+import sqlite3
+import time
 import uuid
 
 import httpx
@@ -29,6 +31,21 @@ import pytest
 import config
 
 BASE = f"http://{config.SERVER_HOST}:{config.SERVER_PORT}"
+
+
+def _retry_on_locked(fn, attempts=3, backoff=0.2):
+    """yaadein/schema.py's connect() sets no WAL mode and no busy_timeout, so
+    this in-process call can race the daemon's own SQLite write transactions
+    and raise sqlite3.OperationalError: database is locked -- retry a few
+    times with a short backoff instead of flaking the test.
+    """
+    for attempt in range(1, attempts + 1):
+        try:
+            return fn()
+        except sqlite3.OperationalError:
+            if attempt == attempts:
+                raise
+            time.sleep(backoff)
 
 
 @pytest.fixture(scope="session")
@@ -128,12 +145,14 @@ def test_live_service_roundtrip_against_daemon_store(daemon):
     unique = f"live-daemon-store-check-{tag}"
 
     service = get_memory_service()
-    memory = service.remember(content=unique, category="fact")
+    memory = _retry_on_locked(
+        lambda: service.remember(content=unique, category="fact")
+    )
     try:
         results = service.recall(unique)
         assert unique in str(results), f"Stored fact not found in recall: {results}"
     finally:
-        assert service.forget(memory.id) is True
+        assert _retry_on_locked(lambda: service.forget(memory.id)) is True
 
     results_after = service.recall(unique)
     assert unique not in str(results_after), "Forgotten memory still returned"
